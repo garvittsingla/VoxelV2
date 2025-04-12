@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vortex",
+  title: "Voxel",
   description: "A metaverse for Singing",
 };
 
