@@ -3,7 +3,8 @@ import Roomcard from "@/components/roomcard";
 export default function Home() {
   return (
     <main className="flex flex-col justify-center items-center h-full w-full">
-      <Roomcard />
+      {/* <Roomcard /> */}
+
     </main>
   );
 }
