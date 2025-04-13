@@ -1,11 +1,15 @@
+import GamePage from "@/components/GamePage";
 import Roomcard from "@/components/roomcard";
 
 export default function Home() {
   return (
-    <main className="flex flex-col justify-center items-center h-full w-full">
+    // <main className="flex flex-col justify-center items-center h-full w-full">
+      
+     <>
       {/* <Roomcard /> */}
-
-    </main>
+      <GamePage/>
+     </>
+    // </main>
   );
 }
 

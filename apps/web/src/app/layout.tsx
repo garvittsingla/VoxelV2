@@ -41,12 +41,12 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body className={`${geistSans.variable} ${geistMono.variable} antialiased grid grid-rows-[20px_1fr_20px] items-center justify-items-between min-h-screen p-8 pb-20 gap-12 sm:p-12 font-[family-name:var(--font-geist-sans)] `}>
-          <header className="flex justify-between items-center p-4 gap-4 h-16">
+          {/* <header className="flex justify-between items-center p-4 gap-4 h-16">
             <h1 className={`${vt.className} text-6xl bg-gradient-to-r from-pink-500 via-red-500 via-orange-400 via-yellow-400 via-green-400 via-blue-500 via-indigo-500 to-purple-600 bg-clip-text text-transparent animate-gradient `}>VOXEL</h1>
             <SignedIn>
               <UserButton  />
             </SignedIn>
-          </header>
+          </header> */}
           {children}
         </body>
       </html>
