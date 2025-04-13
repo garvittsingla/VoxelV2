@@ -1,7 +1,7 @@
 "use client";
 import { useState } from 'react';
 
-export default function Sidebar() {
+export default function Sidebar({roomslug}) {
     const [activeTab, setActiveTab] = useState('messages');
     const [messages, setMessages] = useState([
         { id: 1, sender: 'Alex', content: 'Hello everyone!', time: '10:15' },
@@ -18,12 +18,12 @@ export default function Sidebar() {
         { id: 6, name: 'Robin', online: false, avatar: '👱' }
     ]);
 
-    const [newMessage, setNewMessage] = useState('');
+    const [newMessage, setNewMessage] = useState(roomslug);
     
     // YouTube video state
     const [videoId, setVideoId] = useState('dQw4w9WgXcQ'); // Default video ID
     
-    const handleSendMessage = (e) => {
+    const handleSendMessage = (e:HTMLFormElement) => {
         e.preventDefault();
         if (newMessage.trim()) {
             setMessages([

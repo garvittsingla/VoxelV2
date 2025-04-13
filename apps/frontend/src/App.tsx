@@ -1,14 +1,12 @@
 
-import './App.css'
-import GamePage from './components/GamePage'
-import Roomcard from './components/roomcard'
 
 function App() {
 
  return(
   <>
-    {/* <GamePage/> */}
-    <Roomcard/>
+   <div>
+      Hey i am landing page
+   </div>
   </>
  )
 }

@@ -1,10 +1,13 @@
 "use client";
 import { useState, useEffect } from 'react'
 import * as Phaser  from "phaser"
-import Sidebar from './Sidebar';
+import Sidebar from '../components/Sidebar';
+import { useParams } from 'react-router-dom';
 
 function GamePage() {
+  const {roomslug} = useParams()
   
+ 
     let width:Number,height:Number;
   function getscreensize(){
      width = window.innerWidth ;
@@ -12,6 +15,7 @@ function GamePage() {
   }
   useEffect(()=>{
       getscreensize()
+      // console.log(params.roomslug)
   },[])
    useEffect(() => {
     const config = {
@@ -48,7 +52,7 @@ function GamePage() {
     }
     
     preload() {
-      this.load.image("tiles", "assets/tilemap.png");
+      this.load.image("tiles", "/assets/tilemap.png");
       this.load.tilemapTiledJSON("map", "/assets/bed.json");
       
       // Load a simple circle for the player
@@ -140,7 +144,7 @@ function GamePage() {
     <div className='test flex w-full h-screen '>
       <div id="game-container"></div>
       <div className='menu w-1/5 h-full'>
-        <Sidebar/>
+        <Sidebar roomslug={roomslug}/>
       </div>
     </div>
   )
