@@ -5,10 +5,19 @@ import { useRoomSocket } from "../hooks/useWebSocket";
 export default function Sidebar({ roomslug }: {
     roomslug: string
 }) {
+    console.log(roomslug)
     const [activeTab, setActiveTab] = useState('messages');
     const messageRef = useRef<HTMLInputElement>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
     const { isConnected, messages, joinRoom, sendMessage, leaveRoom } = useRoomSocket();
     const [username] = useState((Math.random()).toString()); // Store username in state
+
+    // Auto-scroll to bottom when new messages arrive
+    useEffect(() => {
+        if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [messages]);
 
     // Join room when component mounts and websocket is connected
     useEffect(() => {
@@ -51,6 +60,13 @@ export default function Sidebar({ roomslug }: {
             messageRef.current.value = '';
         }
     };
+    if (!isConnected){
+        return (
+            <div>
+                Loading
+            </div>
+        )
+    }
 
     return (
         <div className="w-full bg-[#392e2b] h-full flex flex-col border-l-4 border-[#5d4037] shadow-lg text-[#e8d4b7] font-pixel"> 
@@ -82,7 +98,7 @@ export default function Sidebar({ roomslug }: {
                 {/* Content area */}
                 <div className="flex-grow overflow-auto p-4 bg-[#2e2421]">
                     {activeTab === 'messages' && (
-                        <div className="messages-container overflow-y-auto">
+                        <div className="messages-container overflow-y-auto max-h-full">
                             {messages.map((message, index) => (
                                 <div key={index} className="message mb-4 border-2 border-[#5d4037] bg-[#3e322f] p-1 rounded-lg">
                                     <div className="message-header flex justify-between">
@@ -96,6 +112,9 @@ export default function Sidebar({ roomslug }: {
                                     </div>
                                 </div>
                             ))}
+                            {/* Add an empty div at the end that we'll scroll to */}
+                            <div ref={messagesEndRef} />
+                            
                             {messages.length === 0 && (
                                 <div className="text-center text-gray-500 mt-4">
                                     No messages yet. Be the first to say hello!
