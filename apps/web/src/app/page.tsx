@@ -6,8 +6,8 @@ export default function Home() {
     // <main className="flex flex-col justify-center items-center h-full w-full">
       
      <>
-      {/* <Roomcard /> */}
-      <GamePage/>
+      <Roomcard />
+      {/* <GamePage/> */}
      </>
     // </main>
   );
