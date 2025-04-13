@@ -71,13 +71,13 @@ wss.on("connection",(ws)=>{
                 const user = users.find(x=>x.ws===ws)
 
                 const usersinroom = users.filter(x=>x.rooms.includes(roomslug))
-
+                console.log(content)
                 for (let userinroom of usersinroom ){
                     if (userinroom !== user){
                         userinroom.ws.send(JSON.stringify({
                             type:"chat",
                             content : content,
-                            username: request.username
+                            username: username
                         }))
                     }
                 }

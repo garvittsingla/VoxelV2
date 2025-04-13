@@ -1,14 +1,33 @@
 "use client";
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useRoomSocket } from "../hooks/useWebSocket";
 
-export default function Sidebar({roomslug}) {
+export default function Sidebar({ roomslug }: {
+    roomslug: string
+}) {
     const [activeTab, setActiveTab] = useState('messages');
-    const [messages, setMessages] = useState([
-        { id: 1, sender: 'Alex', content: 'Hello everyone!', time: '10:15' },
-        { id: 2, sender: 'Sam', content: 'Hey Alex, welcome to the room!', time: '10:16' },
-        { id: 3, sender: 'Taylor', content: 'Let\'s start the meeting', time: '10:20' }
-    ]);
-    
+    const messageRef = useRef<HTMLInputElement>(null);
+    const { isConnected, messages, joinRoom, sendMessage, leaveRoom } = useRoomSocket();
+    const [username] = useState((Math.random()).toString()); // Store username in state
+
+    // Join room when component mounts and websocket is connected
+    useEffect(() => {
+        if (isConnected) {
+            joinRoom(username, roomslug);
+            console.log(`Joining room ${roomslug} as ${username}`);
+        }
+    }, [isConnected, joinRoom, roomslug, username]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (isConnected) {
+                leaveRoom(username, roomslug);
+                console.log(`Leaving room ${roomslug}`);
+            }
+        };
+    }, [isConnected, leaveRoom, roomslug, username]);
+
     const [members, setMembers] = useState([
         { id: 1, name: 'Alex', online: true, avatar: '👩' },
         { id: 2, name: 'Sam', online: true, avatar: '👨' },
@@ -17,30 +36,29 @@ export default function Sidebar({roomslug}) {
         { id: 5, name: 'Casey', online: true, avatar: '🧑' },
         { id: 6, name: 'Robin', online: false, avatar: '👱' }
     ]);
-
-    const [newMessage, setNewMessage] = useState(roomslug);
     
     // YouTube video state
     const [videoId, setVideoId] = useState('dQw4w9WgXcQ'); // Default video ID
     
-    const handleSendMessage = (e:HTMLFormElement) => {
+    const handleSendMessage = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (newMessage.trim()) {
-            setMessages([
-                ...messages, 
-                { 
-                    id: messages.length + 1, 
-                    sender: 'You', 
-                    content: newMessage, 
-                    time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) 
-                }
-            ]);
-            setNewMessage('');
+        
+        if (messageRef.current && messageRef.current.value.trim()) {
+            // Send the message through WebSocket
+            sendMessage(messageRef.current.value, roomslug, username);
+            
+            // Clear input field after sending
+            messageRef.current.value = '';
         }
     };
 
     return (
         <div className="w-full bg-[#392e2b] h-full flex flex-col border-l-4 border-[#5d4037] shadow-lg text-[#e8d4b7] font-pixel"> 
+            {/* Connection status indicator */}
+            <div className={`px-2 py-1 text-xs ${isConnected ? 'bg-green-800' : 'bg-red-800'}`}>
+                {isConnected ? 'Connected to chat' : 'Disconnected - trying to reconnect...'}
+            </div>
+            
             {/* Top section (3/5 height) */}
             <div className="h-3/5 flex flex-col">
                 {/* Tabs */}
@@ -65,17 +83,24 @@ export default function Sidebar({roomslug}) {
                 <div className="flex-grow overflow-auto p-4 bg-[#2e2421]">
                     {activeTab === 'messages' && (
                         <div className="messages-container overflow-y-auto">
-                            {messages.map(message => (
-                                <div key={message.id} className="message mb-4 border-2 border-[#5d4037] bg-[#3e322f] p-1 rounded-lg">
+                            {messages.map((message, index) => (
+                                <div key={index} className="message mb-4 border-2 border-[#5d4037] bg-[#3e322f] p-1 rounded-lg">
                                     <div className="message-header flex justify-between">
                                         <span className="font-bold text-[#ffc107]">{message.sender}</span>
-                                        <span className="text-xs text-[#a1887f]">{message.time}</span>
+                                        <span className="text-xs text-[#a1887f]">
+                                            {new Date(message.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                        </span>
                                     </div>
                                     <div className="message-body mt-1 text-[#e8d4b7]">
                                         {message.content}
                                     </div>
                                 </div>
                             ))}
+                            {messages.length === 0 && (
+                                <div className="text-center text-gray-500 mt-4">
+                                    No messages yet. Be the first to say hello!
+                                </div>
+                            )}
                         </div>
                     )}
                     
@@ -109,12 +134,13 @@ export default function Sidebar({roomslug}) {
                                 type="text" 
                                 placeholder="Type a message..." 
                                 className="flex-grow p-2 rounded-l-md bg-[#2e2421] border-2 border-[#5d4037] text-[#e8d4b7] focus:outline-none"
-                                value={newMessage}
-                                onChange={(e) => setNewMessage(e.target.value)}
+                                ref={messageRef}
+                                disabled={!isConnected}
                             />
                             <button 
                                 type="submit" 
-                                className="px-4 py-2 bg-[#cb803e] text-white rounded-r-md hover:bg-[#b36d2d] transition-colors"
+                                className={`px-4 py-2 ${isConnected ? 'bg-[#cb803e] hover:bg-[#b36d2d]' : 'bg-gray-500 cursor-not-allowed'} text-white rounded-r-md transition-colors`}
+                                disabled={!isConnected}
                             >
                                 Send
                             </button>
@@ -127,10 +153,7 @@ export default function Sidebar({roomslug}) {
             <div className="h-2/5 border-t-4 border-[#5d4037] flex flex-col">
                 <div className="bg-[#392e2b] p-2 border-b-2 border-[#5d4037] flex justify-between items-center">
                     <h3 className="font-bold text-[#ffc107] px-2">📺 Watch Together</h3>
-                    
-                    <div className='h-10'>
-
-                    </div>
+                    <div className='h-10'></div>
                 </div>
                 
                 <div className="flex-grow bg-[#2e2421] p-2">

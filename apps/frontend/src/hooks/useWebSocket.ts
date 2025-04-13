@@ -1,3 +1,4 @@
+// useRoomSocket.ts - Fixed to properly handle other people's messages
 import { useState, useEffect, useRef, useCallback } from "react";
 
 export interface ChatMessage {
@@ -11,7 +12,7 @@ export interface ChatMessage {
 export interface JoinMessage {
     type: 'join';
     username: string;
-    roomslug: string;
+    roomSlug: string;
 }
 
 export interface LeaveMessage {
@@ -25,11 +26,12 @@ export interface BroadcastedMSG {
     sender: string;
     content: string;
     time: Date;
+    isOwnMessage?: boolean;
 }
 
 interface UseRoomSocketReturn {
     isConnected: boolean;
-    message: string;
+    messages: BroadcastedMSG[];
     joinRoom: (username: string, roomSlug: string) => void;
     sendMessage: (msg: string, roomSlug: string, username: string) => void;
     leaveRoom: (username: string, roomSlug: string) => void;
@@ -37,8 +39,9 @@ interface UseRoomSocketReturn {
 
 export const useRoomSocket = (): UseRoomSocketReturn => {
     const [isConnected, setIsConnected] = useState(false);
-    const [message, setMessage] = useState("");
+    const [messages, setMessages] = useState<BroadcastedMSG[]>([]);
     const socketRef = useRef<WebSocket | null>(null);
+    const userRef = useRef<string | null>(null);
     
     const joinRoom = useCallback((username: string, roomSlug: string) => {
         if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
@@ -46,10 +49,12 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
             return;
         }
         
+        userRef.current = username; // Store the username for later reference
+        
         const joinMessage: JoinMessage = {
             type: "join",
             username,
-            roomslug: roomSlug,
+            roomSlug,
         };
         
         socketRef.current.send(JSON.stringify(joinMessage));
@@ -64,14 +69,27 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         
         const userMsg: ChatMessage = {
             type: 'chat',
-            username: username,
-            roomSlug: roomSlug,
+            username,
+            roomSlug,
             content: msg,
             sentTime: new Date()
         };
         
+        // Add the message to our local state immediately for instant feedback
+        const messageId = Date.now().toString(); // Create a unique ID
+        setMessages(prevMessages => [
+            ...prevMessages,
+            {
+                type: "chat",
+                sender: username,
+                content: msg,
+                time: new Date(),
+                isOwnMessage: true
+            }
+        ]);
+        
         socketRef.current.send(JSON.stringify(userMsg));
-        console.log(`Message sent by ${username}`);
+        console.log(`Message sent by ${username} in room ${roomSlug}: "${msg}"`);
     }, []);
     
     const leaveRoom = useCallback((username: string, roomSlug: string) => {
@@ -102,7 +120,42 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
                 };
                 
                 ws.onmessage = (e) => {
-                    setMessage(e.data);
+                    try {
+                        console.log("Raw received data:", e.data);
+                        const parsedMessage = JSON.parse(e.data);
+                        console.log("Received message:", parsedMessage);
+                        
+                        // Process the received message based on its type
+                        if (parsedMessage.type === "chat") {
+                            // Extract the username from the message, with fallbacks
+                            const senderUsername = parsedMessage.username || parsedMessage.sender;
+                            
+                            // Determine if this is the current user's message
+                            const isFromCurrentUser = senderUsername === userRef.current;
+                            
+                            console.log(`Message from ${senderUsername}, currentUser: ${userRef.current}, isOwn: ${isFromCurrentUser}`);
+                            
+                            // For other people's messages, always add them
+                            if (!isFromCurrentUser) {
+                                setMessages(prevMessages => [
+                                    ...prevMessages,
+                                    {
+                                        type: "chat",
+                                        sender: senderUsername,
+                                        content: parsedMessage.content,
+                                        time: parsedMessage.sentTime || parsedMessage.time || new Date(),
+                                        isOwnMessage: false
+                                    }
+                                ]);
+                                console.log("Added other person's message to chat");
+                            } else {
+                                // Don't add duplicates of our own messages that we've already displayed
+                                console.log("Ignoring own message echo from server");
+                            }
+                        }
+                    } catch (error) {
+                        console.error("Error parsing WebSocket message:", error);
+                    }
                 };
                 
                 ws.onclose = () => {
@@ -113,10 +166,6 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
                 ws.onerror = (error) => {
                     console.error("WebSocket error:", error);
                     setIsConnected(false);
-                };
-                
-                return () => {
-                    ws.close();
                 };
             } catch (error) {
                 console.error("Failed to connect:", error);
@@ -135,7 +184,7 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     
     return {
         isConnected,
-        message,
+        messages,
         joinRoom,
         sendMessage,
         leaveRoom
