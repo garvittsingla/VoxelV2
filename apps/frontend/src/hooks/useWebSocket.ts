@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import AgoraRTC, { 
-  IAgoraRTCClient, 
-  IAgoraRTCRemoteUser, 
-  ILocalAudioTrack, 
-  ILocalVideoTrack, 
-  UID 
+import AgoraRTC, {
+  IAgoraRTCClient,
+  IAgoraRTCRemoteUser,
+  ILocalAudioTrack,
+  ILocalVideoTrack,
+  UID
 } from "agora-rtc-sdk-ng";
 
 // Message types for type safety
@@ -77,10 +77,10 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
   const [players, setPlayers] = useState<Map<string, PlayerData>>(new Map());
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [playersOnStage, setPlayersOnStage] = useState<string[]>([]);
-  
+
   const socketRef = useRef<WebSocket | null>(null);
   const userRef = useRef<string | null>(null);
-  
+
   // Agora client reference
   const agoraClientRef = useRef<IAgoraRTCClient | null>(null);
   const localAudioTrackRef = useRef<ILocalAudioTrack | null>(null);
@@ -90,14 +90,14 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
   // Stable function refs
   const leaveAgoraChannelRef = useRef(async () => {
     if (!agoraClientRef.current) return;
-    
+
     try {
       if (localAudioTrackRef.current) {
         localAudioTrackRef.current.stop();
         localAudioTrackRef.current.close();
         localAudioTrackRef.current = null;
       }
-      
+
       await agoraClientRef.current.leave();
       console.log("Left Agora channel");
       currentRoomRef.current = null;
@@ -112,15 +112,15 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
   useEffect(() => {
     // Check if client already exists to prevent duplication
     if (agoraClientRef.current) return;
-    
+
     const agoraAppId = import.meta.env.VITE_AGORA_APP_ID as string;
-    
+
     if (agoraAppId) {
       agoraClientRef.current = AgoraRTC.createClient({
         mode: "rtc",
         codec: "vp8"
       });
-      
+
       // Set up event listeners only once
       agoraClientRef.current.on("user-published", async (user, mediaType) => {
         if (mediaType === "audio") {
@@ -129,14 +129,14 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
           console.log(`Remote user ${user.uid} audio subscribed`);
         }
       });
-      
+
       agoraClientRef.current.on("user-unpublished", (user, mediaType) => {
         if (mediaType === "audio") {
           console.log(`Remote user ${user.uid} audio unsubscribed`);
         }
       });
     }
-    
+
     // Clean up only when component unmounts (not on re-renders)
     return () => {
       if (agoraClientRef.current && agoraUidRef.current) {
@@ -150,50 +150,54 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       }
     };
   }, []); // Empty dependency array - run only once on mount
-  
+
   // Join Agora channel when player goes on stage
   const joinAgoraChannel = useCallback(async (roomslug: string, username: string) => {
     if (!agoraClientRef.current) return;
-    
+
     try {
-      const agoraAppId = "949d21aaff30482bb5c1116c6020e50a";
-      
-      // Generate a random UID for the current user
-      const uid = Math.floor(Math.random() * 1000000);
-      agoraUidRef.current = uid;
-      currentRoomRef.current = roomslug;
-      
-      // Join the Agora channel (using roomslug as channel name)
-      await agoraClientRef.current.join(agoraAppId, roomslug, null, uid);
-      console.log(`Joined Agora channel ${roomslug} with UID ${uid}`);
-      
+      // Use the actual username as the UID parameter
+      const uid = username;
+
+      // Fetch token from backend
+      const response = await fetch(`http://localhost:5000/get-token?roomName=${roomslug}&uid=${uid}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get token');
+      }
+
+      // Join the Agora channel with the token and numeric UID from the server
+      await agoraClientRef.current.join(import.meta.env.VITE_AGORA_APP_ID, roomslug, data.token, data.uid);
+
       // Create and publish local audio track
       localAudioTrackRef.current = await AgoraRTC.createMicrophoneAudioTrack();
       await agoraClientRef.current.publish([localAudioTrackRef.current]);
-      console.log("Local audio track published");
-      
-      setIsAudioEnabled(true);
-      
+
       // Update player data with Agora UID
       setPlayers(prev => {
         const newMap = new Map(prev);
-        const currentData = newMap.get(username) || { 
-          username, 
-          position: { x: 0, y: 0 } 
+        const currentData = newMap.get(username) || {
+          username,
+          position: { x: 0, y: 0 }
         };
         newMap.set(username, { ...currentData, uid });
         return newMap;
       });
-      
+
+      setIsAudioEnabled(true);
+
+      return true;
     } catch (error) {
-      console.error("Error joining Agora channel:", error);
+      console.error('Error joining Agora channel:', error);
+      return false;
     }
   }, []);
-  
+
   // Leave Agora channel when player leaves stage
   const leaveAgoraChannel = useCallback(async () => {
     if (!agoraClientRef.current) return;
-    
+
     try {
       // Stop and close local tracks
       if (localAudioTrackRef.current) {
@@ -201,43 +205,43 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         localAudioTrackRef.current.close();
         localAudioTrackRef.current = null;
       }
-      
+
       // Leave the channel
       await agoraClientRef.current.leave();
       console.log("Left Agora channel");
       currentRoomRef.current = null;
       agoraUidRef.current = null;
       setIsAudioEnabled(false);
-      
+
     } catch (error) {
       console.error("Error leaving Agora channel:", error);
     }
   }, []);
-  
+
   const joinRoom = useCallback((username: string, roomslug: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
       return;
     }
-    
+
     userRef.current = username;
-    
+
     const joinMessage: JoinMessage = {
       type: "join",
       username,
       roomslug,
     };
-    
+
     socketRef.current.send(JSON.stringify(joinMessage));
     console.log(`User ${username} joined room ${roomslug}`);
   }, []);
-  
+
   const sendMessage = useCallback((msg: string, roomslug: string, username: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
       return;
     }
-    
+
     const userMsg: ChatMessage = {
       type: 'chat',
       username,
@@ -245,7 +249,7 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       content: msg,
       sentTime: new Date()
     };
-    
+
     // Add message to local state for immediate feedback
     setMessages(prevMessages => [
       ...prevMessages,
@@ -257,27 +261,27 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         isOwnMessage: true
       }
     ]);
-    
+
     socketRef.current.send(JSON.stringify(userMsg));
     console.log(`Message sent by ${username} in room ${roomslug}: "${msg}"`);
   }, []);
-  
+
   // Send player position update
   const sendPlayerMove = useCallback((position: { x: number, y: number }, roomslug: string, username: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
       return;
     }
-    
+
     const moveMsg: PlayerMoveMessage = {
       type: 'player_move',
       username,
       roomslug,
       position
     };
-    
+
     socketRef.current.send(JSON.stringify(moveMsg));
-    
+
     // Update local player data too
     setPlayers(prev => {
       const newMap = new Map(prev);
@@ -286,39 +290,39 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       return newMap;
     });
   }, []);
-  
+
   // Send player stage status update with audio handling
   const sendPlayerOnStage = useCallback(async (onStage: boolean, roomslug: string, username: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
       return;
     }
-    
+
     const stageMsg: PlayerOnStageMessage = {
       type: 'player_on_stage',
       username,
       roomslug,
       onStage
     };
-    
+
     socketRef.current.send(JSON.stringify(stageMsg));
-    
+
     // Update local player data
     setPlayers(prev => {
       const newMap = new Map(prev);
-      const currentData = newMap.get(username) || { 
-        username, 
-        position: { x: 0, y: 0 } 
+      const currentData = newMap.get(username) || {
+        username,
+        position: { x: 0, y: 0 }
       };
       newMap.set(username, { ...currentData, onStage });
       return newMap;
     });
-    
+
     // Handle Agora audio based on stage status
     if (onStage) {
       // Player is on stage - join Agora channel to start broadcasting audio
       await joinAgoraChannel(roomslug, username);
-      
+
       // Add to players on stage list
       setPlayersOnStage(prev => {
         if (!prev.includes(username)) {
@@ -329,57 +333,57 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     } else {
       // Player left stage - leave Agora channel to stop broadcasting audio
       await leaveAgoraChannel();
-      
+
       // Remove from players on stage list
       setPlayersOnStage(prev => prev.filter(player => player !== username));
     }
   }, [joinAgoraChannel, leaveAgoraChannel]);
-  
+
   const leaveRoom = useCallback((username: string, roomslug: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
       return;
     }
-    
+
     // If user is on stage, leave Agora channel first
     if (players.get(username)?.onStage) {
       leaveAgoraChannelRef.current();
     }
-    
+
     const leaveMsg: LeaveMessage = {
       type: 'leave',
       roomslug,
       username
     };
-    
+
     socketRef.current.send(JSON.stringify(leaveMsg));
     console.log(`User ${username} left room ${roomslug}`);
   }, [players]);
-  
+
   useEffect(() => {
     const connect = () => {
       try {
         const ws = new WebSocket("ws://localhost:8080");
         socketRef.current = ws;
-        
+
         ws.onopen = () => {
           console.log("WebSocket connected");
           setIsConnected(true);
         };
-        
+
         ws.onmessage = (e) => {
           try {
             console.log("Raw received data:", e.data);
             const parsedMessage = JSON.parse(e.data);
             console.log("Received message:", parsedMessage);
-            
+
             // Process message based on type
             switch (parsedMessage.type) {
               case "chat":
                 // Extract sender username and handle chat message
                 const senderUsername = parsedMessage.username || parsedMessage.sender;
                 const isFromCurrentUser = senderUsername === userRef.current;
-                
+
                 if (!isFromCurrentUser) {
                   setMessages(prevMessages => [
                     ...prevMessages,
@@ -393,36 +397,36 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
                   ]);
                 }
                 break;
-              
+
               case "player_move":
                 // Update player position in our map
                 const { username: moveUsername, position } = parsedMessage;
-                
+
                 setPlayers(prev => {
                   const newMap = new Map(prev);
-                  const currentData = newMap.get(moveUsername) || { 
-                    username: moveUsername, 
-                    position: { x: 0, y: 0 } 
+                  const currentData = newMap.get(moveUsername) || {
+                    username: moveUsername,
+                    position: { x: 0, y: 0 }
                   };
                   newMap.set(moveUsername, { ...currentData, position });
                   return newMap;
                 });
                 break;
-                
+
               case "player_on_stage":
                 // Update player stage status
                 const { username: stageUsername, onStage } = parsedMessage;
-                
+
                 setPlayers(prev => {
                   const newMap = new Map(prev);
-                  const currentData = newMap.get(stageUsername) || { 
-                    username: stageUsername, 
-                    position: { x: 0, y: 0 } 
+                  const currentData = newMap.get(stageUsername) || {
+                    username: stageUsername,
+                    position: { x: 0, y: 0 }
                   };
                   newMap.set(stageUsername, { ...currentData, onStage });
                   return newMap;
                 });
-                
+
                 // Update players on stage list
                 if (onStage) {
                   setPlayersOnStage(prev => {
@@ -432,52 +436,52 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
                     return prev;
                   });
                 } else {
-                  setPlayersOnStage(prev => 
+                  setPlayersOnStage(prev =>
                     prev.filter(player => player !== stageUsername)
                   );
                 }
                 break;
-                
+
               case "player_joined":
                 // Add new player to our map
                 const { username: joinUsername } = parsedMessage;
                 const initialPosition = parsedMessage.position || { x: 0, y: 0 };
-                
+
                 setPlayers(prev => {
                   const newMap = new Map(prev);
-                  newMap.set(joinUsername, { 
-                    username: joinUsername, 
+                  newMap.set(joinUsername, {
+                    username: joinUsername,
                     position: initialPosition
                   });
                   return newMap;
                 });
                 break;
-                
+
               case "player_left":
                 // Remove player from our map
                 const { username: leftUsername } = parsedMessage;
-                
+
                 setPlayers(prev => {
                   const newMap = new Map(prev);
                   newMap.delete(leftUsername);
                   return newMap;
                 });
-                
+
                 // Remove from players on stage if they were there
-                setPlayersOnStage(prev => 
+                setPlayersOnStage(prev =>
                   prev.filter(player => player !== leftUsername)
                 );
                 break;
-                
+
               case "existing_players":
                 // Initialize map with existing players
                 const existingPlayers = parsedMessage.players || [];
-                
+
                 setPlayers(prev => {
                   const newMap = new Map(prev);
                   existingPlayers.forEach((player: PlayerData) => {
                     newMap.set(player.username, player);
-                    
+
                     // Add to players on stage list if they're on stage
                     if (player.onStage) {
                       setPlayersOnStage(prevPlayers => {
@@ -496,12 +500,12 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
             console.error("Error parsing WebSocket message:", error);
           }
         };
-        
+
         ws.onclose = () => {
           console.log("WebSocket disconnected");
           setIsConnected(false);
         };
-        
+
         ws.onerror = (error) => {
           console.error("WebSocket error:", error);
           setIsConnected(false);
@@ -510,16 +514,16 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         console.error("Failed to connect:", error);
       }
     };
-    
+
     connect();
-    
+
     return () => {
       if (socketRef.current) {
         socketRef.current.close();
       }
     };
   }, []); // Empty dependency array means only run at component mount/unmount
-  
+
   return {
     isConnected,
     messages,
