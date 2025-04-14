@@ -3,11 +3,12 @@ import { WebSocketServer,WebSocket } from "ws";
 const wss = new WebSocketServer({port:8080})
 
 interface User{
-    ws:WebSocket,
-    rooms : string[],
-    username:string,
-    position?: { x: number; y: number; }; // Track player position
-    onStage?: boolean; 
+    ws: WebSocket,
+    rooms: string[],
+    username: string,
+    position?: { x: number; y: number; },
+    onStage?: boolean;
+    peerId?: string;
 }
 
 
@@ -140,7 +141,26 @@ wss.on("connection",(ws)=>{
                     }));
                   }
                 }
-              }
+              }else if (request.type === "rtc_signal") {
+                const roomslug = request.roomslug;
+                const username = request.username;
+                const targetUsername = request.targetUsername;
+                const signal = request.signal;
+                
+                // Forward WebRTC signal to the target user
+                const targetUser = users.find(x => 
+                    x.username === targetUsername && 
+                    x.rooms.includes(roomslug)
+                );
+                
+                if (targetUser) {
+                    targetUser.ws.send(JSON.stringify({
+                        type: "rtc_signal",
+                        username: username,
+                        signal: signal
+                    }));
+                }
+            }
 
 
 

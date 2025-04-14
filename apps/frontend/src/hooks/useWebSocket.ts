@@ -1,4 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import AgoraRTC, { 
+  IAgoraRTCClient, 
+  IAgoraRTCRemoteUser, 
+  ILocalAudioTrack, 
+  ILocalVideoTrack, 
+  UID 
+} from "agora-rtc-sdk-ng";
 
 // Message types for type safety
 export interface ChatMessage {
@@ -47,6 +54,7 @@ export interface PlayerData {
   username: string;
   position: { x: number, y: number };
   onStage?: boolean;
+  uid?: UID; // Agora user ID for audio
 }
 
 interface UseRoomSocketReturn {
@@ -58,14 +66,153 @@ interface UseRoomSocketReturn {
   sendPlayerMove: (position: { x: number, y: number }, roomslug: string, username: string) => void;
   sendPlayerOnStage: (onStage: boolean, roomslug: string, username: string) => void;
   leaveRoom: (username: string, roomslug: string) => void;
+  // Agora audio methods
+  isAudioEnabled: boolean;
+  playersOnStage: string[];
 }
 
 export const useRoomSocket = (): UseRoomSocketReturn => {
   const [isConnected, setIsConnected] = useState(false);
   const [messages, setMessages] = useState<BroadcastedMSG[]>([]);
   const [players, setPlayers] = useState<Map<string, PlayerData>>(new Map());
+  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
+  const [playersOnStage, setPlayersOnStage] = useState<string[]>([]);
+  
   const socketRef = useRef<WebSocket | null>(null);
   const userRef = useRef<string | null>(null);
+  
+  // Agora client reference
+  const agoraClientRef = useRef<IAgoraRTCClient | null>(null);
+  const localAudioTrackRef = useRef<ILocalAudioTrack | null>(null);
+  const agoraUidRef = useRef<UID | null>(null);
+  const currentRoomRef = useRef<string | null>(null);
+
+  // Stable function refs
+  const leaveAgoraChannelRef = useRef(async () => {
+    if (!agoraClientRef.current) return;
+    
+    try {
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.stop();
+        localAudioTrackRef.current.close();
+        localAudioTrackRef.current = null;
+      }
+      
+      await agoraClientRef.current.leave();
+      console.log("Left Agora channel");
+      currentRoomRef.current = null;
+      agoraUidRef.current = null;
+      setIsAudioEnabled(false);
+    } catch (error) {
+      console.error("Error leaving Agora channel:", error);
+    }
+  });
+
+  // Initialize Agora client ONCE
+  useEffect(() => {
+    // Check if client already exists to prevent duplication
+    if (agoraClientRef.current) return;
+    
+    const agoraAppId = import.meta.env.VITE_AGORA_APP_ID as string;
+    
+    if (agoraAppId) {
+      agoraClientRef.current = AgoraRTC.createClient({
+        mode: "rtc",
+        codec: "vp8"
+      });
+      
+      // Set up event listeners only once
+      agoraClientRef.current.on("user-published", async (user, mediaType) => {
+        if (mediaType === "audio") {
+          await agoraClientRef.current?.subscribe(user, mediaType);
+          user.audioTrack?.play();
+          console.log(`Remote user ${user.uid} audio subscribed`);
+        }
+      });
+      
+      agoraClientRef.current.on("user-unpublished", (user, mediaType) => {
+        if (mediaType === "audio") {
+          console.log(`Remote user ${user.uid} audio unsubscribed`);
+        }
+      });
+    }
+    
+    // Clean up only when component unmounts (not on re-renders)
+    return () => {
+      if (agoraClientRef.current && agoraUidRef.current) {
+        // Only leave if we're actually connected
+        if (localAudioTrackRef.current) {
+          localAudioTrackRef.current.stop();
+          localAudioTrackRef.current.close();
+        }
+        agoraClientRef.current.leave().catch(console.error);
+        setIsAudioEnabled(false);
+      }
+    };
+  }, []); // Empty dependency array - run only once on mount
+  
+  // Join Agora channel when player goes on stage
+  const joinAgoraChannel = useCallback(async (roomslug: string, username: string) => {
+    if (!agoraClientRef.current) return;
+    
+    try {
+      const agoraAppId = "949d21aaff30482bb5c1116c6020e50a";
+      
+      // Generate a random UID for the current user
+      const uid = Math.floor(Math.random() * 1000000);
+      agoraUidRef.current = uid;
+      currentRoomRef.current = roomslug;
+      
+      // Join the Agora channel (using roomslug as channel name)
+      await agoraClientRef.current.join(agoraAppId, roomslug, null, uid);
+      console.log(`Joined Agora channel ${roomslug} with UID ${uid}`);
+      
+      // Create and publish local audio track
+      localAudioTrackRef.current = await AgoraRTC.createMicrophoneAudioTrack();
+      await agoraClientRef.current.publish([localAudioTrackRef.current]);
+      console.log("Local audio track published");
+      
+      setIsAudioEnabled(true);
+      
+      // Update player data with Agora UID
+      setPlayers(prev => {
+        const newMap = new Map(prev);
+        const currentData = newMap.get(username) || { 
+          username, 
+          position: { x: 0, y: 0 } 
+        };
+        newMap.set(username, { ...currentData, uid });
+        return newMap;
+      });
+      
+    } catch (error) {
+      console.error("Error joining Agora channel:", error);
+    }
+  }, []);
+  
+  // Leave Agora channel when player leaves stage
+  const leaveAgoraChannel = useCallback(async () => {
+    if (!agoraClientRef.current) return;
+    
+    try {
+      // Stop and close local tracks
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.stop();
+        localAudioTrackRef.current.close();
+        localAudioTrackRef.current = null;
+      }
+      
+      // Leave the channel
+      await agoraClientRef.current.leave();
+      console.log("Left Agora channel");
+      currentRoomRef.current = null;
+      agoraUidRef.current = null;
+      setIsAudioEnabled(false);
+      
+    } catch (error) {
+      console.error("Error leaving Agora channel:", error);
+    }
+  }, []);
   
   const joinRoom = useCallback((username: string, roomslug: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
@@ -140,8 +287,8 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     });
   }, []);
   
-  // Send player stage status update
-  const sendPlayerOnStage = useCallback((onStage: boolean, roomslug: string, username: string) => {
+  // Send player stage status update with audio handling
+  const sendPlayerOnStage = useCallback(async (onStage: boolean, roomslug: string, username: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
       return;
@@ -156,7 +303,7 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     
     socketRef.current.send(JSON.stringify(stageMsg));
     
-    // Update local player data too
+    // Update local player data
     setPlayers(prev => {
       const newMap = new Map(prev);
       const currentData = newMap.get(username) || { 
@@ -166,12 +313,37 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       newMap.set(username, { ...currentData, onStage });
       return newMap;
     });
-  }, []);
+    
+    // Handle Agora audio based on stage status
+    if (onStage) {
+      // Player is on stage - join Agora channel to start broadcasting audio
+      await joinAgoraChannel(roomslug, username);
+      
+      // Add to players on stage list
+      setPlayersOnStage(prev => {
+        if (!prev.includes(username)) {
+          return [...prev, username];
+        }
+        return prev;
+      });
+    } else {
+      // Player left stage - leave Agora channel to stop broadcasting audio
+      await leaveAgoraChannel();
+      
+      // Remove from players on stage list
+      setPlayersOnStage(prev => prev.filter(player => player !== username));
+    }
+  }, [joinAgoraChannel, leaveAgoraChannel]);
   
   const leaveRoom = useCallback((username: string, roomslug: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
       return;
+    }
+    
+    // If user is on stage, leave Agora channel first
+    if (players.get(username)?.onStage) {
+      leaveAgoraChannelRef.current();
     }
     
     const leaveMsg: LeaveMessage = {
@@ -182,7 +354,7 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     
     socketRef.current.send(JSON.stringify(leaveMsg));
     console.log(`User ${username} left room ${roomslug}`);
-  }, []);
+  }, [players]);
   
   useEffect(() => {
     const connect = () => {
@@ -250,6 +422,20 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
                   newMap.set(stageUsername, { ...currentData, onStage });
                   return newMap;
                 });
+                
+                // Update players on stage list
+                if (onStage) {
+                  setPlayersOnStage(prev => {
+                    if (!prev.includes(stageUsername)) {
+                      return [...prev, stageUsername];
+                    }
+                    return prev;
+                  });
+                } else {
+                  setPlayersOnStage(prev => 
+                    prev.filter(player => player !== stageUsername)
+                  );
+                }
                 break;
                 
               case "player_joined":
@@ -276,6 +462,11 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
                   newMap.delete(leftUsername);
                   return newMap;
                 });
+                
+                // Remove from players on stage if they were there
+                setPlayersOnStage(prev => 
+                  prev.filter(player => player !== leftUsername)
+                );
                 break;
                 
               case "existing_players":
@@ -286,6 +477,16 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
                   const newMap = new Map(prev);
                   existingPlayers.forEach((player: PlayerData) => {
                     newMap.set(player.username, player);
+                    
+                    // Add to players on stage list if they're on stage
+                    if (player.onStage) {
+                      setPlayersOnStage(prevPlayers => {
+                        if (!prevPlayers.includes(player.username)) {
+                          return [...prevPlayers, player.username];
+                        }
+                        return prevPlayers;
+                      });
+                    }
                   });
                   return newMap;
                 });
@@ -317,7 +518,7 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         socketRef.current.close();
       }
     };
-  }, []);
+  }, []); // Empty dependency array means only run at component mount/unmount
   
   return {
     isConnected,
@@ -327,6 +528,8 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     sendMessage,
     sendPlayerMove,
     sendPlayerOnStage,
-    leaveRoom
+    leaveRoom,
+    isAudioEnabled,
+    playersOnStage
   };
 };

@@ -16,14 +16,16 @@ function GamePage() {
   // Screen dimensions
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   
-  // WebSocket connection
+  // WebSocket connection with Agora audio
   const { 
     isConnected, 
     players, 
     sendPlayerMove, 
     sendPlayerOnStage,
     joinRoom,
-    leaveRoom
+    leaveRoom,
+    isAudioEnabled,
+    playersOnStage
   } = useRoomSocket();
   
   // Get screen size
@@ -62,6 +64,7 @@ function GamePage() {
       private otherPlayers: Map<string, Phaser.Physics.Arcade.Sprite> = new Map();
       private lastPositionUpdate = 0;
       private nameLabels: Map<string, Phaser.GameObjects.Text> = new Map();
+      private audioIndicators: Map<string, Phaser.GameObjects.Image> = new Map();
       
       constructor() {
         super("SceneMain");
@@ -73,6 +76,9 @@ function GamePage() {
         
         // Load player sprite
         this.load.image("player", "/assets/player.png");
+        
+        // Load audio indicator icon
+        this.load.image("audio", "/assets/audio-icon.png"); // Add this icon to your assets
       }
       
       create() {
@@ -183,6 +189,17 @@ function GamePage() {
           playerLabel.setPosition(this.player.x, this.player.y - 30);
         }
         
+        // Update audio indicator for current player if on stage
+        if (this.playerOnStage) {
+          let audioIcon = this.audioIndicators.get(username);
+          if (!audioIcon) {
+            audioIcon = this.add.image(this.player.x, this.player.y - 50, 'audio');
+            audioIcon.setScale(0.5);
+            this.audioIndicators.set(username, audioIcon);
+          }
+          audioIcon.setPosition(this.player.x, this.player.y - 50);
+        }
+        
         // Check if player is on a stage tile
         const playerTileX = this.layer1.worldToTileX(this.player.x);
         const playerTileY = this.layer1.worldToTileY(this.player.y);
@@ -194,7 +211,7 @@ function GamePage() {
           (tileLayer1 && tileLayer1.properties && tileLayer1.properties.stage === true) || 
           (tileLayer2 && tileLayer2.properties && tileLayer2.properties.stage === true);
         
-        // Handle stage entry/exit
+        // Handle stage entry/exit with audio
         if (isOnStage && !this.playerOnStage) {
           console.log('Player is on stage!');
           this.playerOnStage = true;
@@ -206,6 +223,14 @@ function GamePage() {
           
           // Visual effect when on stage (optional glow)
           this.player.setTint(0xffff00);
+          
+          // Add audio indicator
+          if (!this.audioIndicators.get(username)) {
+            const audioIcon = this.add.image(this.player.x, this.player.y - 50, 'audio');
+            audioIcon.setScale(0.5);
+            this.audioIndicators.set(username, audioIcon);
+          }
+          
         } else if (!isOnStage && this.playerOnStage) {
           console.log('Player left the stage!');
           this.playerOnStage = false;
@@ -217,6 +242,13 @@ function GamePage() {
           
           // Remove visual effect
           this.player.clearTint();
+          
+          // Remove audio indicator
+          const audioIcon = this.audioIndicators.get(username);
+          if (audioIcon) {
+            audioIcon.destroy();
+            this.audioIndicators.delete(username);
+          }
         }
         
         // Send position updates to other players when this player moves
@@ -259,8 +291,22 @@ function GamePage() {
           // Apply tint if player is on stage
           if (playerData.onStage) {
             playerSprite.setTint(0xffff00);
+            
+            // Add audio indicator if not already there
+            if (!this.audioIndicators.get(playerName)) {
+              const audioIcon = this.add.image(position.x, position.y - 50, 'audio');
+              audioIcon.setScale(0.5);
+              this.audioIndicators.set(playerName, audioIcon);
+            }
           } else {
             playerSprite.clearTint();
+            
+            // Remove audio indicator if exists
+            const audioIcon = this.audioIndicators.get(playerName);
+            if (audioIcon) {
+              audioIcon.destroy();
+              this.audioIndicators.delete(playerName);
+            }
           }
           
           // Move player with animation
@@ -277,6 +323,12 @@ function GamePage() {
           if (label) {
             label.setPosition(position.x, position.y - 30);
           }
+          
+          // Update audio indicator position
+          const audioIndicator = this.audioIndicators.get(playerName);
+          if (audioIndicator) {
+            audioIndicator.setPosition(position.x, position.y - 50);
+          }
         });
         
         // Clean up disconnected players
@@ -291,6 +343,13 @@ function GamePage() {
             if (label) {
               label.destroy();
               this.nameLabels.delete(playerName);
+            }
+            
+            // Remove audio indicator
+            const audioIcon = this.audioIndicators.get(playerName);
+            if (audioIcon) {
+              audioIcon.destroy();
+              this.audioIndicators.delete(playerName);
             }
           }
         });
@@ -336,12 +395,64 @@ function GamePage() {
     };
   }, [isConnected, roomslug, username, joinRoom, leaveRoom]);
   
+  // Audio UI indicators - show who's currently on stage
+  const renderPlayersOnStage = () => {
+    if (playersOnStage.length === 0) return null;
+    
+    return (
+      <div className="absolute top-4 right-4 bg-black bg-opacity-70 p-2 rounded-lg">
+        <h3 className="text-white font-bold mb-1">On Stage:</h3>
+        <ul>
+          {playersOnStage.map(player => (
+            <li key={player} className="text-white flex items-center">
+              <span className="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span>
+              {player}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+  
+  // Audio permission banner if needed
+  const [showMicPermission, setShowMicPermission] = useState(false);
+  
+  // Check if player is on stage
+  const isOnStage = players.get(username)?.onStage || false;
+  
+  // Show microphone permission banner when player first goes on stage
+  useEffect(() => {
+    if (isOnStage && !isAudioEnabled) {
+      setShowMicPermission(true);
+    } else {
+      setShowMicPermission(false);
+    }
+  }, [isOnStage, isAudioEnabled]);
+  
   return (
-    <div className='test flex w-full h-screen'>
+    <div className='test flex w-full h-screen relative'>
       <div id="game-container" className="w-4/5 h-full"></div>
       <div className='menu w-1/5 h-full'>
         <Sidebar roomslug={roomslug || ''}/>
       </div>
+      
+      {/* Audio status indicators */}
+      {renderPlayersOnStage()}
+      
+      {/* Microphone permission banner */}
+      {showMicPermission && (
+        <div className="absolute top-0 left-0 right-0 bg-yellow-500 text-black p-2 text-center">
+          This game requires microphone access for stage audio. Please allow microphone permissions.
+        </div>
+      )}
+      
+      {/* Audio status notification */}
+      {isOnStage && (
+        <div className="absolute bottom-4 left-4 bg-red-600 text-white px-3 py-1 rounded-full flex items-center">
+          <div className="w-2 h-2 bg-red-300 rounded-full animate-pulse mr-2"></div>
+          Your microphone is active - you're on stage!
+        </div>
+      )}
     </div>
   );
 }
