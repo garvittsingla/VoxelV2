@@ -6,7 +6,12 @@
     "dev": "tsc -b && node dist/index.js"
   },
   "dependencies": {
-    "@repo/typescript-config":"workspace:*"
+    "@repo/typescript-config": "workspace:*",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "agora-access-token": "^2.0.4",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
   },
   "keywords": [],
   "author": "",
