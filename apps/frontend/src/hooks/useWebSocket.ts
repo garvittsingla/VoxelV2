@@ -42,8 +42,35 @@ export interface PlayerOnStageMessage {
   onStage: boolean;
 }
 
+export interface PlayerJoinedMessage {
+  type: 'player_joined';
+  username: string;
+  roomslug: string;
+  position: { x: number, y: number };
+}
+
+export interface ExistingPlayersMessage {
+  type: 'existing_players';
+  roomslug: string;
+  players: Array<{
+    username: string;
+    position: { x: number, y: number };
+    onStage?: boolean;
+    uid?: UID;
+  }>;
+}
+
+export type WebSocketMessage =
+  | ChatMessage
+  | JoinMessage
+  | LeaveMessage
+  | PlayerMoveMessage
+  | PlayerOnStageMessage
+  | PlayerJoinedMessage
+  | ExistingPlayersMessage;
+
 export interface BroadcastedMSG {
-  type: "chat";
+  type: "chat" | "system";
   sender: string;
   content: string;
   time: Date;
@@ -74,7 +101,7 @@ interface UseRoomSocketReturn {
 export const useRoomSocket = (): UseRoomSocketReturn => {
   const [isConnected, setIsConnected] = useState(false);
   const [messages, setMessages] = useState<BroadcastedMSG[]>([]);
-  const [players, setPlayers] = useState<Map<string, PlayerData>>(new Map());
+  const [players, setPlayers] = useState<Map<string, PlayerData>>(new Map<string, PlayerData>());
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [playersOnStage, setPlayersOnStage] = useState<string[]>([]);
 
@@ -156,23 +183,23 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     if (!agoraClientRef.current) return;
 
     try {
-      // Use the actual username as the UID parameter
-      const uid = username;
+      const agoraAppId = "949d21aaff30482bb5c1116c6020e50a";
 
-      // Fetch token from backend
-      const response = await fetch(`http://localhost:5000/get-token?roomName=${roomslug}&uid=${uid}`);
-      const data = await response.json();
+      // Generate a random UID for the current user
+      const uid = Math.floor(Math.random() * 1000000);
+      agoraUidRef.current = uid;
+      currentRoomRef.current = roomslug;
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to get token');
-      }
-
-      // Join the Agora channel with the token and numeric UID from the server
-      await agoraClientRef.current.join(import.meta.env.VITE_AGORA_APP_ID, roomslug, data.token, data.uid);
+      // Join the Agora channel (using roomslug as channel name)
+      await agoraClientRef.current.join(agoraAppId, roomslug, null, uid);
+      console.log(`Joined Agora channel ${roomslug} with UID ${uid}`);
 
       // Create and publish local audio track
       localAudioTrackRef.current = await AgoraRTC.createMicrophoneAudioTrack();
       await agoraClientRef.current.publish([localAudioTrackRef.current]);
+      console.log("Local audio track published");
+
+      setIsAudioEnabled(true);
 
       // Update player data with Agora UID
       setPlayers(prev => {
@@ -185,16 +212,8 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         return newMap;
       });
 
-      setIsAudioEnabled(true);
-
-      // Show alert to confirm successful connection to Agora channel
-      alert(`Successfully connected to Agora voice channel: ${roomslug}`);
-
-      return true;
     } catch (error) {
-      console.error('Error joining Agora channel:', error);
-      alert(`Failed to connect to Agora voice channel: ${error}`);
-      return false;
+      console.error("Error joining Agora channel:", error);
     }
   }, []);
 
@@ -223,12 +242,18 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
   }, []);
 
   const joinRoom = useCallback((username: string, roomslug: string) => {
+    console.log("joinRoom called with:", { username, roomslug });
+    console.log("WebSocket state:", socketRef.current?.readyState);
+
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      console.error("WebSocket is not connected");
+      console.error("WebSocket is not connected. State:", socketRef.current?.readyState);
+      // Try to reconnect
+      connect();
       return;
     }
 
     userRef.current = username;
+    console.log("Setting userRef to:", username);
 
     const joinMessage: JoinMessage = {
       type: "join",
@@ -236,12 +261,9 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       roomslug,
     };
 
+    console.log("Sending join message:", joinMessage);
     socketRef.current.send(JSON.stringify(joinMessage));
-    console.log(`User ${username} joined room ${roomslug}`);
-
-    // Connect to Agora voice channel when joining the room
-    joinAgoraChannel(roomslug, username);
-  }, [joinAgoraChannel]);
+  }, []);
 
   const sendMessage = useCallback((msg: string, roomslug: string, username: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
@@ -249,12 +271,13 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       return;
     }
 
+    const sentTime = new Date();
     const userMsg: ChatMessage = {
       type: 'chat',
       username,
       roomslug,
       content: msg,
-      sentTime: new Date()
+      sentTime
     };
 
     // Add message to local state for immediate feedback
@@ -264,13 +287,13 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         type: "chat",
         sender: username,
         content: msg,
-        time: new Date(),
+        time: sentTime,
         isOwnMessage: true
       }
     ]);
 
+    console.log("Sending chat message:", userMsg);
     socketRef.current.send(JSON.stringify(userMsg));
-    console.log(`Message sent by ${username} in room ${roomslug}: "${msg}"`);
   }, []);
 
   // Send player position update
@@ -298,7 +321,7 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
     });
   }, []);
 
-  // Send player stage status update without audio handling
+  // Send player stage status update with audio handling
   const sendPlayerOnStage = useCallback(async (onStage: boolean, roomslug: string, username: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.error("WebSocket is not connected");
@@ -325,8 +348,12 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       return newMap;
     });
 
-    // Update players on stage list
+    // Handle Agora audio based on stage status
     if (onStage) {
+      // Player is on stage - join Agora channel to start broadcasting audio
+      await joinAgoraChannel(roomslug, username);
+
+      // Add to players on stage list
       setPlayersOnStage(prev => {
         if (!prev.includes(username)) {
           return [...prev, username];
@@ -334,9 +361,13 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
         return prev;
       });
     } else {
+      // Player left stage - leave Agora channel to stop broadcasting audio
+      await leaveAgoraChannel();
+
+      // Remove from players on stage list
       setPlayersOnStage(prev => prev.filter(player => player !== username));
     }
-  }, []);
+  }, [joinAgoraChannel, leaveAgoraChannel]);
 
   const leaveRoom = useCallback((username: string, roomslug: string) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
@@ -344,8 +375,10 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
       return;
     }
 
-    // Leave Agora channel when leaving the room
-    leaveAgoraChannel();
+    // If user is on stage, leave Agora channel first
+    if (players.get(username)?.onStage) {
+      leaveAgoraChannelRef.current();
+    }
 
     const leaveMsg: LeaveMessage = {
       type: 'leave',
@@ -355,171 +388,198 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
 
     socketRef.current.send(JSON.stringify(leaveMsg));
     console.log(`User ${username} left room ${roomslug}`);
-  }, [leaveAgoraChannel]);
+  }, [players]);
+
+  const connect = useCallback(() => {
+    try {
+      console.log("Attempting to connect to WebSocket...");
+      const ws = new WebSocket("ws://localhost:8080");
+      socketRef.current = ws;
+
+      ws.onopen = () => {
+        console.log("WebSocket connected successfully. State:", ws.readyState);
+        setIsConnected(true);
+
+        // If we have a pending join, execute it
+        if (userRef.current) {
+          console.log("Executing pending join for user:", userRef.current);
+          // Re-join any rooms we were in
+          // This will be handled by the component's useEffect
+        }
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const parsedMessage = JSON.parse(e.data);
+
+          // Don't log ping/pong messages to reduce noise
+          if (parsedMessage.type !== "ping" && parsedMessage.type !== "pong") {
+            console.log("Received WebSocket message:", parsedMessage);
+          }
+
+          // Handle heartbeat ping
+          if (parsedMessage.type === "ping") {
+            if (socketRef.current?.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({ type: "pong" }));
+            }
+            return;
+          }
+
+          // Process message based on type
+          switch (parsedMessage.type) {
+            case "chat":
+              // Extract sender username and handle chat message
+              const senderUsername = parsedMessage.username || parsedMessage.sender;
+              const isFromCurrentUser = senderUsername === userRef.current;
+
+              if (!isFromCurrentUser) {
+                console.log("Received chat message:", parsedMessage);
+                setMessages(prevMessages => [
+                  ...prevMessages,
+                  {
+                    type: "chat",
+                    sender: senderUsername,
+                    content: parsedMessage.content,
+                    time: new Date(parsedMessage.time) || new Date(),
+                    isOwnMessage: false
+                  }
+                ]);
+              }
+              break;
+
+            case "player_joined":
+              // Add new player to our map
+              const { username: joinUsername } = parsedMessage;
+              const initialPosition = parsedMessage.position || { x: 0, y: 0 };
+              console.log("Player joined:", joinUsername, "at position:", initialPosition);
+
+              setPlayers(prev => {
+                const newMap = new Map(prev);
+                newMap.set(joinUsername, {
+                  username: joinUsername,
+                  position: initialPosition
+                });
+                console.log("Updated players after join:", Array.from(newMap.entries()));
+                return newMap;
+              });
+              break;
+
+            case "player_move":
+              // Update player position in our map
+              const { username: moveUsername, position } = parsedMessage;
+              console.log("Player move:", moveUsername, "to position:", position);
+
+              setPlayers(prev => {
+                const newMap = new Map(prev);
+                const currentData = newMap.get(moveUsername) || {
+                  username: moveUsername,
+                  position: { x: 0, y: 0 }
+                };
+                newMap.set(moveUsername, { ...currentData, position });
+                return newMap;
+              });
+              break;
+
+            case "player_on_stage":
+              // Update player stage status
+              const { username: stageUsername, onStage } = parsedMessage;
+              console.log("Player stage status update:", stageUsername, onStage);
+
+              setPlayers(prev => {
+                const newMap = new Map(prev);
+                const currentData = newMap.get(stageUsername) || {
+                  username: stageUsername,
+                  position: { x: 0, y: 0 }
+                };
+                newMap.set(stageUsername, { ...currentData, onStage });
+                return newMap;
+              });
+
+              // Update players on stage list
+              if (onStage) {
+                setPlayersOnStage(prev => {
+                  if (!prev.includes(stageUsername)) {
+                    return [...prev, stageUsername];
+                  }
+                  return prev;
+                });
+              } else {
+                setPlayersOnStage(prev =>
+                  prev.filter(player => player !== stageUsername)
+                );
+              }
+              break;
+
+            case "existing_players":
+              // Initialize map with existing players
+              const existingPlayers = parsedMessage.players || [];
+              console.log("Received existing players:", existingPlayers);
+
+              setPlayers(prev => {
+                const newMap = new Map(prev);
+                existingPlayers.forEach((player: PlayerData) => {
+                  newMap.set(player.username, player);
+                  // Add to players on stage list if they're on stage
+                  if (player.onStage) {
+                    setPlayersOnStage(prevPlayers => {
+                      if (!prevPlayers.includes(player.username)) {
+                        return [...prevPlayers, player.username];
+                      }
+                      return prevPlayers;
+                    });
+                  }
+                });
+                console.log("Updated players after existing_players:", Array.from(newMap.entries()));
+                return newMap;
+              });
+              break;
+
+            case "player_left":
+              const { username: leftUsername } = parsedMessage;
+              console.log("Player left:", leftUsername);
+
+              setPlayers(prev => {
+                const newMap = new Map(prev);
+                newMap.delete(leftUsername);
+                console.log("Updated players after leave:", Array.from(newMap.entries()));
+                return newMap;
+              });
+
+              // Remove from players on stage if they were there
+              setPlayersOnStage(prev =>
+                prev.filter(player => player !== leftUsername)
+              );
+              break;
+          }
+        } catch (error) {
+          console.error("Error processing WebSocket message:", error);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket disconnected");
+        setIsConnected(false);
+      };
+
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        setIsConnected(false);
+      };
+    } catch (error) {
+      console.error("Failed to connect:", error);
+    }
+  }, []);
 
   useEffect(() => {
-    const connect = () => {
-      try {
-        const ws = new WebSocket("ws://localhost:8080");
-        socketRef.current = ws;
-
-        ws.onopen = () => {
-          console.log("WebSocket connected");
-          setIsConnected(true);
-        };
-
-        ws.onmessage = (e) => {
-          try {
-            console.log("Raw received data:", e.data);
-            const parsedMessage = JSON.parse(e.data);
-            console.log("Received message:", parsedMessage);
-
-            // Process message based on type
-            switch (parsedMessage.type) {
-              case "chat":
-                // Extract sender username and handle chat message
-                const senderUsername = parsedMessage.username || parsedMessage.sender;
-                const isFromCurrentUser = senderUsername === userRef.current;
-
-                if (!isFromCurrentUser) {
-                  setMessages(prevMessages => [
-                    ...prevMessages,
-                    {
-                      type: "chat",
-                      sender: senderUsername,
-                      content: parsedMessage.content,
-                      time: parsedMessage.sentTime || parsedMessage.time || new Date(),
-                      isOwnMessage: false
-                    }
-                  ]);
-                }
-                break;
-
-              case "player_move":
-                // Update player position in our map
-                const { username: moveUsername, position } = parsedMessage;
-
-                setPlayers(prev => {
-                  const newMap = new Map(prev);
-                  const currentData = newMap.get(moveUsername) || {
-                    username: moveUsername,
-                    position: { x: 0, y: 0 }
-                  };
-                  newMap.set(moveUsername, { ...currentData, position });
-                  return newMap;
-                });
-                break;
-
-              case "player_on_stage":
-                // Update player stage status
-                const { username: stageUsername, onStage } = parsedMessage;
-
-                setPlayers(prev => {
-                  const newMap = new Map(prev);
-                  const currentData = newMap.get(stageUsername) || {
-                    username: stageUsername,
-                    position: { x: 0, y: 0 }
-                  };
-                  newMap.set(stageUsername, { ...currentData, onStage });
-                  return newMap;
-                });
-
-                // Update players on stage list
-                if (onStage) {
-                  setPlayersOnStage(prev => {
-                    if (!prev.includes(stageUsername)) {
-                      return [...prev, stageUsername];
-                    }
-                    return prev;
-                  });
-                } else {
-                  setPlayersOnStage(prev =>
-                    prev.filter(player => player !== stageUsername)
-                  );
-                }
-                break;
-
-              case "player_joined":
-                // Add new player to our map
-                const { username: joinUsername } = parsedMessage;
-                const initialPosition = parsedMessage.position || { x: 0, y: 0 };
-
-                setPlayers(prev => {
-                  const newMap = new Map(prev);
-                  newMap.set(joinUsername, {
-                    username: joinUsername,
-                    position: initialPosition
-                  });
-                  return newMap;
-                });
-                break;
-
-              case "player_left":
-                // Remove player from our map
-                const { username: leftUsername } = parsedMessage;
-
-                setPlayers(prev => {
-                  const newMap = new Map(prev);
-                  newMap.delete(leftUsername);
-                  return newMap;
-                });
-
-                // Remove from players on stage if they were there
-                setPlayersOnStage(prev =>
-                  prev.filter(player => player !== leftUsername)
-                );
-                break;
-
-              case "existing_players":
-                // Initialize map with existing players
-                const existingPlayers = parsedMessage.players || [];
-
-                setPlayers(prev => {
-                  const newMap = new Map(prev);
-                  existingPlayers.forEach((player: PlayerData) => {
-                    newMap.set(player.username, player);
-
-                    // Add to players on stage list if they're on stage
-                    if (player.onStage) {
-                      setPlayersOnStage(prevPlayers => {
-                        if (!prevPlayers.includes(player.username)) {
-                          return [...prevPlayers, player.username];
-                        }
-                        return prevPlayers;
-                      });
-                    }
-                  });
-                  return newMap;
-                });
-                break;
-            }
-          } catch (error) {
-            console.error("Error parsing WebSocket message:", error);
-          }
-        };
-
-        ws.onclose = () => {
-          console.log("WebSocket disconnected");
-          setIsConnected(false);
-        };
-
-        ws.onerror = (error) => {
-          console.error("WebSocket error:", error);
-          setIsConnected(false);
-        };
-      } catch (error) {
-        console.error("Failed to connect:", error);
-      }
-    };
-
     connect();
 
     return () => {
+      console.log("Cleaning up WebSocket connection...");
       if (socketRef.current) {
         socketRef.current.close();
       }
     };
-  }, []); // Empty dependency array means only run at component mount/unmount
+  }, [connect]); // Empty dependency array means only run at component mount/unmount
 
   return {
     isConnected,

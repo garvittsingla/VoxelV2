@@ -1,37 +1,28 @@
-import { Link } from 'react-router-dom'
+import './App.css'
+import { useNavigate } from 'react-router-dom'
 
 function App() {
-
+   const navigate = useNavigate()
+   function signUp() {
+      navigate("/game/meet")
+   }
    return (
-      <>
-         <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
-            <h1 className="text-3xl font-bold mb-8">Welcome to Voxel</h1>
+      <div className="h-screen w-full antialiased p-8 flex flex-col bg-center" style={{ backgroundImage: `url("/pxeljungle.gif")`, backgroundSize: 'cover', backgroundRepeat: 'no-repeat', backgroundColor: '#000' }}>
+         <nav>
+            <ul className="flex items-center justify-between flex-row text-white font-bold text-2xl font-['VT323']">
+               <li>VOXEL</li>
+               <li><button onClick={signUp} className='text-pink-400 bg-black/80 rounded-md text-3xl w-[100px] h-[50px] hover:bg-white/80 hover:text-blue-800'>SignUp</button></li>
+            </ul>
+         </nav>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
-               <Link
-                  to="/game/test"
-                  className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow"
-               >
-                  <h2 className="text-xl font-semibold mb-2">Join Voice Meeting</h2>
-                  <p className="text-gray-600 mb-4">Join a voice meeting room to communicate with others.</p>
-                  <div className="text-blue-600 font-medium">Join Meeting →</div>
-               </Link>
+         <header className='flex flex-col items-center justify-center mt-20 gap-4'>
+            <h1 className="text-white text-6xl font-bold flex flex-col font-['Inter_Tight']"><span className='text-[6rem] font-bold text-violet-400'>The Ultimate</span>Voice Chat Platform</h1>
+            <p className="text-white font-bold text-2xl font-['Inter_Tight']">Leave the boring voice calls and start chatting with your friends today!</p>
+            <h1 className="text-2xl md:text-5xl lg:text-7xl font-bold text-center text-white relative z-2 font-sans">
 
-               <Link
-                  to="/game/test"
-                  className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow"
-               >
-                  <h2 className="text-xl font-semibold mb-2">Join Game Room</h2>
-                  <p className="text-gray-600 mb-4">Join a game room to play and interact with others.</p>
-                  <div className="text-blue-600 font-medium">Join Game →</div>
-               </Link>
-            </div>
-
-            <div className="mt-12 text-center">
-               <p className="text-gray-500">Create your own room by changing the URL: /game/your-room-name</p>
-            </div>
-         </div>
-      </>
+            </h1>
+         </header>
+      </div>
    )
 }
 

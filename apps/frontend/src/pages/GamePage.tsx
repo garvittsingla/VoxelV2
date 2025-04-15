@@ -1,10 +1,26 @@
+//hola
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as Phaser from "phaser";
 import Sidebar from '../components/Sidebar';
 import { useParams } from 'react-router-dom';
 import { useRoomSocket } from "../hooks/useWebSocket";
 import { useAgora } from "../hooks/useAgora";
+
+// Define SceneMain type before using it in useRef
+interface ISceneMain extends Phaser.Scene {
+  cursors: Phaser.Types.Input.Keyboard.CursorKeys;
+  player: Phaser.Physics.Arcade.Sprite;
+  map: Phaser.Tilemaps.Tilemap;
+  layer1: Phaser.Tilemaps.TilemapLayer;
+  layer2: Phaser.Tilemaps.TilemapLayer;
+  playerOnStage: boolean;
+  otherPlayers: Map<string, Phaser.Physics.Arcade.Sprite>;
+  lastPositionUpdate: number;
+  nameLabels: Map<string, Phaser.GameObjects.Text>;
+  audioIndicators: Map<string, Phaser.GameObjects.Image>;
+  updateOtherPlayers(players: Map<string, any>): void;
+}
 
 function GamePage() {
   const { roomslug } = useParams();
@@ -12,7 +28,7 @@ function GamePage() {
 
   // Game state refs
   const gameRef = useRef<Phaser.Game | null>(null);
-  const sceneRef = useRef<SceneMain | null>(null);
+  const sceneRef = useRef<ISceneMain | null>(null);
 
   // Screen dimensions
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -20,17 +36,22 @@ function GamePage() {
   // WebSocket connection
   const {
     isConnected,
+    messages,
     players,
     sendPlayerMove,
     sendPlayerOnStage,
     joinRoom,
     leaveRoom,
     isAudioEnabled,
-    playersOnStage
+    playersOnStage,
+    sendMessage
   } = useRoomSocket();
 
   // Agora voice connection
   const agora = useAgora(username);
+
+  // Local state to track if player is on stage
+  const [playerOnStage, setPlayerOnStage] = useState(false);
 
   // Get screen size
   useEffect(() => {
@@ -49,7 +70,13 @@ function GamePage() {
 
   // Join room when component mounts
   useEffect(() => {
+    if (!isConnected) {
+      console.log("Waiting for WebSocket connection...");
+      return;
+    }
+
     if (roomslug && username) {
+      console.log("Joining room with username:", username.toString(), "roomslug:", roomslug);
       joinRoom(username.toString(), roomslug);
       // Connect to Agora voice channel when joining room
       agora.joinCall();
@@ -58,21 +85,37 @@ function GamePage() {
     // Cleanup when component unmounts
     return () => {
       if (roomslug && username) {
+        console.log("Component unmounting, leaving room...");
         leaveRoom(username.toString(), roomslug);
         agora.leaveCall();
       }
     };
-  }, []);
+  }, [isConnected, roomslug, username]); // Add isConnected to dependencies
+
+  // Update microphone status whenever player's stage status changes
+  useEffect(() => {
+    // Check if player is on stage from players map
+    const isOnStage = players.get(username.toString())?.onStage || false;
+    console.log("Player stage status check:", { username: username.toString(), isOnStage });
+
+    // Update local state
+    setPlayerOnStage(isOnStage);
+
+    // Update microphone status based on stage status
+    agora.updateMicrophoneByStageStatus(isOnStage);
+  }, [players, username, agora]);
 
   // Handle stage status changes (now only for visual effects)
   const handleStageStatusChange = async (onStage: boolean) => {
     if (!roomslug) return;
     sendPlayerOnStage(onStage, roomslug, username.toString());
+    // The mic will be controlled by the useEffect above that watches for player status changes
   };
 
   // Update other players when their positions change
   useEffect(() => {
     if (sceneRef.current) {
+      console.log("Players state updated:", Array.from(players.entries()));
       sceneRef.current.updateOtherPlayers(players);
     }
   }, [players]);
@@ -81,17 +124,17 @@ function GamePage() {
   useEffect(() => {
     if (dimensions.width === 0) return;
 
-    class SceneMain extends Phaser.Scene {
-      private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-      private player!: Phaser.Physics.Arcade.Sprite;
-      private map!: Phaser.Tilemaps.Tilemap;
-      private layer1!: Phaser.Tilemaps.TilemapLayer;
-      private layer2!: Phaser.Tilemaps.TilemapLayer;
-      private playerOnStage: boolean = false;
-      private otherPlayers: Map<string, Phaser.Physics.Arcade.Sprite> = new Map();
-      private lastPositionUpdate = 0;
-      private nameLabels: Map<string, Phaser.GameObjects.Text> = new Map();
-      private audioIndicators: Map<string, Phaser.GameObjects.Image> = new Map();
+    class SceneMain extends Phaser.Scene implements ISceneMain {
+      cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+      player!: Phaser.Physics.Arcade.Sprite;
+      map!: Phaser.Tilemaps.Tilemap;
+      layer1!: Phaser.Tilemaps.TilemapLayer;
+      layer2!: Phaser.Tilemaps.TilemapLayer;
+      playerOnStage: boolean = false;
+      otherPlayers: Map<string, Phaser.Physics.Arcade.Sprite> = new Map();
+      lastPositionUpdate = 0;
+      nameLabels: Map<string, Phaser.GameObjects.Text> = new Map();
+      audioIndicators: Map<string, Phaser.GameObjects.Image> = new Map();
 
       constructor() {
         super("SceneMain");
@@ -121,9 +164,14 @@ function GamePage() {
         });
         const tileset = this.map.addTilesetImage("mapv1", "tiles");
 
-        // Create layers
-        this.layer1 = this.map.createLayer("Tile Layer 1", tileset, 0, 0);
-        this.layer2 = this.map.createLayer("Tile Layer 2", tileset, 0, 0);
+        // Create layers with null checks
+        if (tileset) {
+          this.layer1 = this.map.createLayer("Tile Layer 1", tileset, 0, 0)!;
+          this.layer2 = this.map.createLayer("Tile Layer 2", tileset, 0, 0)!;
+        } else {
+          console.error("Failed to create tileset");
+          return;
+        }
 
         // Calculate scale factor to make map fit canvas
         const mapWidth = this.map.widthInPixels;
@@ -159,7 +207,11 @@ function GamePage() {
         this.nameLabels.set(username.toString(), playerLabel);
 
         // Set up keyboard input
-        this.cursors = this.input.keyboard.createCursorKeys();
+        if (this.input && this.input.keyboard) {
+          this.cursors = this.input.keyboard.createCursorKeys();
+        } else {
+          console.error("Keyboard input not available");
+        }
 
         // Set collisions
         this.layer1.setCollisionByProperty({ collides: true });
@@ -205,9 +257,11 @@ function GamePage() {
           playerMoved = true;
         }
 
-        // Normalize diagonal movement
-        if (this.player.body.velocity.x !== 0 && this.player.body.velocity.y !== 0) {
-          this.player.body.velocity.normalize().scale(speed);
+        // Normalize diagonal movement with null checks
+        if (this.player.body && this.player.body.velocity) {
+          if (this.player.body.velocity.x !== 0 && this.player.body.velocity.y !== 0) {
+            this.player.body.velocity.normalize().scale(speed);
+          }
         }
 
         // Update player label position
@@ -281,21 +335,34 @@ function GamePage() {
         // Send position updates to other players when this player moves
         if (playerMoved && roomslug && isConnected && time - this.lastPositionUpdate > 100) {
           this.lastPositionUpdate = time;
+          console.log("Sending player move:", { x: this.player.x, y: this.player.y });
           sendPlayerMove({ x: this.player.x, y: this.player.y }, roomslug, username.toString());
         }
       }
 
-      // Method to update other players
+      // Update the updateOtherPlayers method in SceneMain class:
       updateOtherPlayers(players: Map<string, any>) {
+        console.log("updateOtherPlayers called with players:", players);
+
         players.forEach((playerData, playerName) => {
           // Skip current player
-          if (playerName === username.toString()) return;
+          if (playerName === username.toString()) {
+            console.log("Skipping current player:", playerName);
+            return;
+          }
 
           const position = playerData.position;
+          if (!position) {
+            console.log("No position data for player:", playerName);
+            return; // Skip if no position data
+          }
+
+          console.log("Processing player:", playerName, "at position:", position);
 
           // Get or create sprite for this player
           let playerSprite = this.otherPlayers.get(playerName);
           if (!playerSprite) {
+            console.log("Creating new sprite for player:", playerName);
             playerSprite = this.physics.add.sprite(position.x, position.y, 'player');
             playerSprite.setScale(1.5);
             this.otherPlayers.set(playerName, playerSprite);
@@ -314,6 +381,9 @@ function GamePage() {
             nameLabel.setOrigin(0.5);
             this.nameLabels.set(playerName, nameLabel);
           }
+
+          // Update player properties
+          playerSprite.setData('onStage', playerData.onStage || false);
 
           // Apply tint if player is on stage
           if (playerData.onStage) {
@@ -336,14 +406,17 @@ function GamePage() {
             }
           }
 
-          // Move player with animation
-          this.tweens.add({
-            targets: playerSprite,
-            x: position.x,
-            y: position.y,
-            duration: 100,
-            ease: 'Linear'
-          });
+          // Only update position if it's different to prevent jitter
+          if (playerSprite.x !== position.x || playerSprite.y !== position.y) {
+            console.log("Updating sprite position for:", playerName, "from", { x: playerSprite.x, y: playerSprite.y }, "to", position);
+            this.tweens.add({
+              targets: playerSprite,
+              x: position.x,
+              y: position.y,
+              duration: 100,
+              ease: 'Linear'
+            });
+          }
 
           // Update label position
           const label = this.nameLabels.get(playerName);
@@ -351,7 +424,7 @@ function GamePage() {
             label.setPosition(position.x, position.y - 30);
           }
 
-          // Update audio indicator position
+          // Update audio indicator position if exists
           const audioIndicator = this.audioIndicators.get(playerName);
           if (audioIndicator) {
             audioIndicator.setPosition(position.x, position.y - 50);
@@ -359,8 +432,10 @@ function GamePage() {
         });
 
         // Clean up disconnected players
+        const currentPlayerNames = Array.from(players.keys());
         this.otherPlayers.forEach((sprite, playerName) => {
-          if (!players.has(playerName)) {
+          if (!currentPlayerNames.includes(playerName)) {
+            console.log("Removing disconnected player:", playerName);
             // Remove sprite
             sprite.destroy();
             this.otherPlayers.delete(playerName);
@@ -384,7 +459,7 @@ function GamePage() {
     }
 
     // Create the Phaser game
-    const config = {
+    const config: Phaser.Types.Core.GameConfig = {
       type: Phaser.AUTO,
       width: (dimensions.width / 3) * 2.4,
       height: dimensions.height,
@@ -393,7 +468,7 @@ function GamePage() {
       physics: {
         default: 'arcade',
         arcade: {
-          gravity: { y: 0 },
+          gravity: { x: 0, y: 0 },
           debug: false
         }
       }
@@ -446,7 +521,13 @@ function GamePage() {
     <div className='test flex w-full h-screen relative'>
       <div id="game-container" className="w-4/5 h-full"></div>
       <div className='menu w-1/5 h-full'>
-        <Sidebar roomslug={roomslug || ''} />
+        <Sidebar
+          roomslug={roomslug || ''}
+          username={username.toString()}
+          isConnected={isConnected}
+          messages={messages}
+          sendMessage={sendMessage}
+        />
       </div>
 
       {/* Audio status indicators */}
@@ -463,21 +544,23 @@ function GamePage() {
       {isOnStage && (
         <div className="absolute bottom-4 left-4 bg-red-600 text-white px-3 py-1 rounded-full flex items-center">
           <div className="w-2 h-2 bg-red-300 rounded-full animate-pulse mr-2"></div>
-          Your microphone is active - you're on stage!
+          {agora.isMicMuted ? "Your microphone is muted while on stage" : "Your microphone is active - you're on stage!"}
         </div>
       )}
 
       {/* Mic control overlay buttons */}
       <div className="absolute bottom-4 right-4 flex space-x-2">
-        <button
-          onClick={() => handleStageStatusChange(true)}
-          className={`p-3 rounded-full ${isOnStage ? 'bg-green-500' : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity`}
-          title="Go on stage"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-          </svg>
-        </button>
+        {isOnStage && (
+          <button
+            onClick={() => handleStageStatusChange(true)}
+            className={`p-3 rounded-full ${isOnStage ? 'bg-green-500' : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity`}
+            title="Go on stage"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+          </button>
+        )}
 
         <button
           onClick={() => handleStageStatusChange(false)}

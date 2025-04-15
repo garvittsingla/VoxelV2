@@ -172,11 +172,15 @@ export const useAgora = (username: number) => {
             console.log("Creating local audio track...");
             const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
             localAudioTrackRef.current = localAudioTrack;
+            
+            // Initially mute the microphone until the player is on stage
+            localAudioTrack.setEnabled(false);
+            setIsMicMuted(true);
+            
             await clientRef.current.publish([localAudioTrack]);
-            console.log("Local audio track published successfully");
+            console.log("Local audio track published successfully (initially muted)");
 
             setIsJoined(true);
-            setIsMicMuted(false);
             setRemoteUsers(prev => {
                 if (prev.includes(numericUid)) return prev;
                 return [...prev, numericUid];
@@ -199,6 +203,19 @@ export const useAgora = (username: number) => {
         setIsMicMuted(newMicState);
     }, [isMicMuted]);
 
+    // New method to control microphone based on stage status
+    const updateMicrophoneByStageStatus = useCallback((isOnStage: boolean) => {
+        if (!localAudioTrackRef.current || !isJoined) return;
+
+        console.log(`Updating microphone state based on stage status: ${isOnStage ? 'ON stage' : 'OFF stage'}`);
+        
+        // Only enable mic when on stage
+        localAudioTrackRef.current.setEnabled(isOnStage);
+        setIsMicMuted(!isOnStage);
+        
+        console.log(`Microphone is now ${isOnStage ? 'UNMUTED' : 'MUTED'}`);
+    }, [isJoined]);
+
     return {
         isJoined,
         isMicMuted,
@@ -206,6 +223,7 @@ export const useAgora = (username: number) => {
         error,
         joinCall,
         leaveCall,
-        toggleMic
+        toggleMic,
+        updateMicrophoneByStageStatus  // Export the new method
     };
 };
