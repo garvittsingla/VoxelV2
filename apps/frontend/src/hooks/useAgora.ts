@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import AgoraRTC, { IAgoraRTCClient, IMicrophoneAudioTrack } from 'agora-rtc-sdk-ng';
+import AgoraRTC, { IAgoraRTCClient, IMicrophoneAudioTrack, IAgoraRTCRemoteUser } from 'agora-rtc-sdk-ng';
 import { useParams } from 'react-router-dom';
 
 // Agora app ID
 const APP_ID = "23828ec815ef48438b31cb5bd5c7103f";
 
 export const useAgora = (username: number) => {
-    const { roomslug } = useParams();
+    const { roomslug } = useParams<{ roomslug: string }>();
     const [isJoined, setIsJoined] = useState(false);
     const [isMicMuted, setIsMicMuted] = useState(false);
-    const [remoteUsers, setRemoteUsers] = useState<number[]>([]);
+    const [remoteUsers, setRemoteUsers] = useState<IAgoraRTCRemoteUser[]>([]);
     const [error, setError] = useState<string | null>(null);
 
     const clientRef = useRef<IAgoraRTCClient | null>(null);
@@ -27,7 +27,7 @@ export const useAgora = (username: number) => {
         try {
             console.log("Starting Agora client initialization...");
             initializationAttempted.current = true;
-            
+
             // Create the Agora client
             clientRef.current = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
             console.log("Client created successfully:", clientRef.current);
@@ -64,24 +64,23 @@ export const useAgora = (username: number) => {
         console.log("Setting up Agora event listeners");
         const client = clientRef.current;
 
-        const handleUserPublished = async (user: any, mediaType: "audio" | "video" | "datachannel") => {
+        const handleUserPublished = async (user: IAgoraRTCRemoteUser, mediaType: "audio" | "video" | "datachannel") => {
+            console.log("User published:", user.uid, mediaType);
             await client.subscribe(user, mediaType);
             if (mediaType === "audio") {
                 user.audioTrack?.play();
-                console.log("Remote audio:", user.uid);
             }
-            setRemoteUsers(prev => {
-                if (prev.includes(user.uid)) return prev;
-                return [...prev, user.uid];
-            });
+            setRemoteUsers(prev => [...prev, user]);
         };
 
-        const handleUserUnpublished = (user: any) => {
-            setRemoteUsers(prev => prev.filter(uid => uid !== user.uid));
+        const handleUserUnpublished = (user: IAgoraRTCRemoteUser) => {
+            console.log("User unpublished:", user.uid);
+            setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
         };
 
-        const handleUserLeft = (user: any) => {
-            setRemoteUsers(prev => prev.filter(uid => uid !== user.uid));
+        const handleUserLeft = (user: IAgoraRTCRemoteUser) => {
+            console.log("User left:", user.uid);
+            setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
         };
 
         client.on("user-published", handleUserPublished);
@@ -129,19 +128,13 @@ export const useAgora = (username: number) => {
     }, [isJoined]);
 
     const joinCall = useCallback(async () => {
-        console.log("Join call attempted with state:", {
-            clientExists: !!clientRef.current,
-            roomslug,
-            isJoined
-        });
-
-        if (!clientRef.current || !roomslug || isJoined) {
-            console.log("Cannot join call - prerequisites not met");
+        if (!clientRef.current || !roomslug) {
+            console.error("Cannot join call: client not initialized or no room slug");
             return;
         }
 
         try {
-            console.log("Attempting to join Agora call in room:", roomslug);
+            console.log("Joining Agora channel:", roomslug);
 
             // Get token from backend
             console.log("Fetching token from backend...");
@@ -155,7 +148,7 @@ export const useAgora = (username: number) => {
             const token = data.token;
             // Use the numeric UID returned from the server instead of the username
             const numericUid = data.uid;
-            
+
             console.log("Token received successfully");
 
             // Join the channel
@@ -164,7 +157,7 @@ export const useAgora = (username: number) => {
                 channel: roomslug,
                 uid: numericUid // Use the numeric UID from server here
             });
-            
+
             await clientRef.current.join(APP_ID, roomslug, token, numericUid);
             console.log("Successfully joined Agora channel");
 
@@ -172,19 +165,16 @@ export const useAgora = (username: number) => {
             console.log("Creating local audio track...");
             const localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
             localAudioTrackRef.current = localAudioTrack;
-            
+
             // Initially mute the microphone until the player is on stage
             localAudioTrack.setEnabled(false);
             setIsMicMuted(true);
-            
+
             await clientRef.current.publish([localAudioTrack]);
             console.log("Local audio track published successfully (initially muted)");
 
             setIsJoined(true);
-            setRemoteUsers(prev => {
-                if (prev.includes(numericUid)) return prev;
-                return [...prev, numericUid];
-            });
+            setRemoteUsers([]); // Reset remote users when joining
             setError(null);
 
             console.log("✅ Joined voice channel:", roomslug);
@@ -193,7 +183,7 @@ export const useAgora = (username: number) => {
             setError(err instanceof Error ? err.message : 'Failed to join call');
             alert(`Failed to connect to Agora voice channel: ${err}`);
         }
-    }, [roomslug, isJoined, username]);
+    }, [roomslug, username]);
 
     const toggleMic = useCallback(() => {
         if (!localAudioTrackRef.current) return;
@@ -208,11 +198,11 @@ export const useAgora = (username: number) => {
         if (!localAudioTrackRef.current || !isJoined) return;
 
         console.log(`Updating microphone state based on stage status: ${isOnStage ? 'ON stage' : 'OFF stage'}`);
-        
+
         // Only enable mic when on stage
         localAudioTrackRef.current.setEnabled(isOnStage);
         setIsMicMuted(!isOnStage);
-        
+
         console.log(`Microphone is now ${isOnStage ? 'UNMUTED' : 'MUTED'}`);
     }, [isJoined]);
 

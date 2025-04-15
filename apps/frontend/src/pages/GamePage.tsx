@@ -3,9 +3,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as Phaser from "phaser";
 import Sidebar from '../components/Sidebar';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useRoomSocket } from "../hooks/useWebSocket";
 import { useAgora } from "../hooks/useAgora";
+import { IAgoraRTCRemoteUser } from "agora-rtc-sdk-ng";
 
 // Define SceneMain type before using it in useRef
 interface ISceneMain extends Phaser.Scene {
@@ -23,6 +24,7 @@ interface ISceneMain extends Phaser.Scene {
 }
 
 function GamePage() {
+  const navigate = useNavigate()
   const { roomslug } = useParams();
   const [username] = useState(() => Math.floor(Math.random() * 1000000) + 1); // Generate numeric username between 1-1000000
 
@@ -52,6 +54,14 @@ function GamePage() {
 
   // Local state to track if player is on stage
   const [playerOnStage, setPlayerOnStage] = useState(false);
+
+  // Add recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map());
 
   // Get screen size
   useEffect(() => {
@@ -101,15 +111,50 @@ function GamePage() {
     // Update local state
     setPlayerOnStage(isOnStage);
 
-    // Update microphone status based on stage status
-    agora.updateMicrophoneByStageStatus(isOnStage);
+    // Only update microphone status when entering/leaving stage, not during manual mute
+    if (!isOnStage) {
+      // Always mute when leaving stage
+      agora.updateMicrophoneByStageStatus(false);
+    } else if (!agora.isMicMuted) {
+      // Only unmute when entering stage if not manually muted
+      agora.updateMicrophoneByStageStatus(true);
+    }
   }, [players, username, agora]);
 
-  // Handle stage status changes (now only for visual effects)
-  const handleStageStatusChange = async (onStage: boolean) => {
+  // Add meeting start time tracking
+  const [meetingStartTime] = useState(() => new Date());
+
+  // Function to format duration
+  const formatDuration = (startTime: Date) => {
+    const duration = new Date().getTime() - startTime.getTime();
+    const hours = Math.floor(duration / (1000 * 60 * 60));
+    const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((duration % (1000 * 60)) / 1000);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // Handle leaving the meeting
+  const handleLeaveMeeting = async () => {
     if (!roomslug) return;
-    sendPlayerOnStage(onStage, roomslug, username.toString());
-    // The mic will be controlled by the useEffect above that watches for player status changes
+
+    // Calculate meeting duration
+    const duration = formatDuration(meetingStartTime);
+
+    // Store meeting info in localStorage
+    const recentMeets = JSON.parse(localStorage.getItem('recentMeets') || '[]');
+    recentMeets.unshift({
+      roomName: roomslug,
+      duration: duration,
+      date: new Date().toISOString(),
+    });
+    localStorage.setItem('recentMeets', JSON.stringify(recentMeets.slice(0, 10))); // Keep last 10 meetings
+
+    // Leave the Agora channel
+    await agora.leaveCall();
+
+    // Navigate to dashboard
+    // window.location.href = '/dashboard';
+    navigate("/dashboard")
   };
 
   // Update other players when their positions change
@@ -517,6 +562,160 @@ function GamePage() {
     }
   }, [isOnStage, isAudioEnabled]);
 
+  // Function to start recording
+  const startRecording = useCallback(async () => {
+    try {
+      // Only allow recording if user is on stage
+      if (!isOnStage) {
+        console.log("You must be on stage to record");
+        return;
+      }
+
+      // Create audio context and destination
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+
+      const audioDestination = audioContext.createMediaStreamDestination();
+      audioDestinationRef.current = audioDestination;
+
+      // Get local microphone stream
+      const localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Create source for local audio
+      const localSource = audioContext.createMediaStreamSource(localStream);
+      localSource.connect(audioDestination);
+      audioSourcesRef.current.set('local', localSource);
+
+      // Connect all remote users' audio to the destination
+      if (agora.remoteUsers && agora.remoteUsers.length > 0) {
+        agora.remoteUsers.forEach((user: IAgoraRTCRemoteUser) => {
+          if (user.audioTrack) {
+            // Create a MediaStream from the audio track
+            const remoteStream = new MediaStream([user.audioTrack.getMediaStreamTrack()]);
+
+            // Create source for remote audio
+            const remoteSource = audioContext.createMediaStreamSource(remoteStream);
+            remoteSource.connect(audioDestination);
+            audioSourcesRef.current.set(user.uid.toString(), remoteSource);
+
+            console.log(`Connected remote user ${user.uid} audio to recording`);
+          }
+        });
+      }
+
+      // Create MediaRecorder with the combined audio stream
+      const mediaRecorder = new MediaRecorder(audioDestination.stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      // Set up event handlers
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        // Create audio blob from chunks
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+
+        // Create download link
+        const url = URL.createObjectURL(audioBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `stage-recording-${new Date().toISOString()}.wav`;
+        document.body.appendChild(a);
+        a.click();
+
+        // Clean up
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 100);
+
+        // Disconnect all audio sources
+        audioSourcesRef.current.forEach(source => {
+          source.disconnect();
+        });
+        audioSourcesRef.current.clear();
+
+        // Stop all tracks
+        localStream.getTracks().forEach(track => track.stop());
+
+        // Close audio context
+        if (audioContextRef.current) {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+        }
+      };
+
+      // Start recording
+      mediaRecorder.start();
+      setIsRecording(true);
+      console.log("Recording started - capturing all stage audio");
+    } catch (error) {
+      console.error("Error starting recording:", error);
+    }
+  }, [isOnStage, agora.remoteUsers]);
+
+  // Function to stop recording
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      console.log("Recording stopped");
+    }
+  }, [isRecording]);
+
+  // Update audio sources when remote users change
+  useEffect(() => {
+    if (isRecording && audioDestinationRef.current && agora.remoteUsers && agora.remoteUsers.length > 0) {
+      // Connect any new remote users
+      agora.remoteUsers.forEach((user: IAgoraRTCRemoteUser) => {
+        if (user.audioTrack && !audioSourcesRef.current.has(user.uid.toString())) {
+          // Create a MediaStream from the audio track
+          const remoteStream = new MediaStream([user.audioTrack.getMediaStreamTrack()]);
+
+          // Create source for remote audio
+          const remoteSource = audioContextRef.current!.createMediaStreamSource(remoteStream);
+          remoteSource.connect(audioDestinationRef.current!);
+          audioSourcesRef.current.set(user.uid.toString(), remoteSource);
+
+          console.log(`Connected new remote user ${user.uid} audio to recording`);
+        }
+      });
+
+      // Disconnect users who left
+      const currentUserIds = new Set(agora.remoteUsers.map((user: IAgoraRTCRemoteUser) => user.uid.toString()));
+      audioSourcesRef.current.forEach((source, userId) => {
+        if (userId !== 'local' && !currentUserIds.has(userId)) {
+          source.disconnect();
+          audioSourcesRef.current.delete(userId);
+          console.log(`Disconnected remote user ${userId} audio from recording`);
+        }
+      });
+    }
+  }, [isRecording, agora.remoteUsers]);
+
+  // Handle stage status changes
+  const handleStageStatusChange = async (onStage: boolean) => {
+    if (!roomslug) return;
+    sendPlayerOnStage(onStage, roomslug, username.toString());
+  };
+
+  // Handle mic toggle
+  const handleMicToggle = () => {
+    if (!roomslug || !isOnStage) return;
+
+    if (agora.isMicMuted) {
+      // Unmute - stay on stage and enable mic
+      agora.updateMicrophoneByStageStatus(true);
+    } else {
+      // Mute - stay on stage but disable mic
+      agora.updateMicrophoneByStageStatus(false);
+    }
+  };
+
   return (
     <div className='test flex w-full h-screen relative'>
       <div id="game-container" className="w-4/5 h-full"></div>
@@ -548,29 +747,72 @@ function GamePage() {
         </div>
       )}
 
+      {/* Record button - only visible when on stage */}
+      {isOnStage && (
+        <div className="absolute bottom-4 right-86">
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            className={`p-3 rounded-full ${isRecording ? 'bg-red-600' : 'bg-blue-500'} text-white shadow-lg hover:opacity-90 transition-opacity flex items-center gap-2`}
+            title={isRecording ? "Stop Recording" : "Start Recording"}
+          >
+            {isRecording ? (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                </svg>
+                <span>Stop Recording</span>
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                <span>Start Recording</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Mic control overlay buttons */}
       <div className="absolute bottom-4 right-4 flex space-x-2">
-        {isOnStage && (
-          <button
-            onClick={() => handleStageStatusChange(true)}
-            className={`p-3 rounded-full ${isOnStage ? 'bg-green-500' : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity`}
-            title="Go on stage"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-            </svg>
-          </button>
-        )}
+        <button
+          disabled={!isOnStage}
+          onClick={handleMicToggle}
+          className={`p-3 rounded-full ${isOnStage ? (agora.isMicMuted ? 'bg-gray-500' : 'bg-green-500') : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity flex items-center gap-2 ${!isOnStage ? 'opacity-50 cursor-not-allowed' : ''}`}
+          title={agora.isMicMuted ? "Unmute microphone" : "Mute microphone"}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+          <span>{agora.isMicMuted ? "Unmute" : "Mute"}</span>
+        </button>
 
         <button
           onClick={() => handleStageStatusChange(false)}
-          className={`p-3 rounded-full ${!isOnStage ? 'bg-red-500' : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity`}
+          className={`p-3 rounded-full ${!isOnStage ? 'bg-red-500' : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity flex items-center gap-2`}
           title="Leave stage"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
           </svg>
+          <span>Leave Stage</span>
+        </button>
+      </div>
+
+      {/* Leave meeting button */}
+      <div className="absolute top-4 left-4">
+        <button
+          onClick={handleLeaveMeeting}
+          className="p-3 rounded-full bg-red-500 text-white shadow-lg hover:opacity-90 transition-opacity flex items-center gap-2"
+          title="Leave Meeting"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span>Leave Meeting</span>
         </button>
       </div>
     </div>
