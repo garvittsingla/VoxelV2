@@ -1,4 +1,3 @@
-//hola
 "use client";
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as Phaser from "phaser";
@@ -6,6 +5,7 @@ import Sidebar from '../components/Sidebar';
 import { useParams } from 'react-router-dom';
 import { useRoomSocket } from "../hooks/useWebSocket";
 import { useAgora } from "../hooks/useAgora";
+import { useUser } from "@clerk/clerk-react";
 
 // Define SceneMain type before using it in useRef
 interface ISceneMain extends Phaser.Scene {
@@ -20,18 +20,26 @@ interface ISceneMain extends Phaser.Scene {
   nameLabels: Map<string, Phaser.GameObjects.Text>;
   audioIndicators: Map<string, Phaser.GameObjects.Image>;
   updateOtherPlayers(players: Map<string, any>): void;
+  interactionText: Phaser.GameObjects.Text | null;
+  eKey: Phaser.Input.Keyboard.Key | null;
+  nearTV: boolean;
 }
 
 function GamePage() {
   const { roomslug } = useParams();
-  const [username] = useState(() => Math.floor(Math.random() * 1000000) + 1); // Generate numeric username between 1-1000000
-
+  const { user } = useUser();
+  console.log("user is " + user?.primaryEmailAddress)
+  const username = user?.primaryEmailAddress
   // Game state refs
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<ISceneMain | null>(null);
 
   // Screen dimensions
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  
+  // TV Popup state
+  const [showTVPopup, setShowTVPopup] = useState(false);
+  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 });
 
   // WebSocket connection
   const {
@@ -120,6 +128,54 @@ function GamePage() {
     }
   }, [players]);
 
+  // Handle E key press from outside Phaser
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'e' && sceneRef.current?.nearTV) {
+        // Toggle TV popup
+        setShowTVPopup(prev => !prev);
+        
+        if (!showTVPopup && sceneRef.current?.player) {
+          // Set popup position relative to player position
+          const x = sceneRef.current.player.x;
+          const y = sceneRef.current.player.y - 100;
+          
+          // Convert Phaser world coordinates to screen coordinates
+          const camera = sceneRef.current.cameras.main;
+          const screenX = x - camera.scrollX;
+          const screenY = y - camera.scrollY;
+          
+          setPopupPosition({ 
+            x: screenX + gameRef.current?.canvas.offsetLeft || 0, 
+            y: screenY + gameRef.current?.canvas.offsetTop || 0 
+          });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showTVPopup]);
+
+  // Close popup when clicking outside
+  useEffect(() => {
+    if (!showTVPopup) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const popup = document.querySelector('.popup');
+      if (popup && !popup.contains(e.target as Node)) {
+        setShowTVPopup(false);
+      }
+    };
+    
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showTVPopup]);
+
   // Initialize Phaser game
   useEffect(() => {
     if (dimensions.width === 0) return;
@@ -135,6 +191,9 @@ function GamePage() {
       lastPositionUpdate = 0;
       nameLabels: Map<string, Phaser.GameObjects.Text> = new Map();
       audioIndicators: Map<string, Phaser.GameObjects.Image> = new Map();
+      interactionText: Phaser.GameObjects.Text | null = null;
+      eKey: Phaser.Input.Keyboard.Key | null = null;
+      nearTV: boolean = false;
 
       constructor() {
         super("SceneMain");
@@ -142,13 +201,13 @@ function GamePage() {
 
       preload() {
         this.load.image("tiles", "/assets/tilemap.png");
-        this.load.tilemapTiledJSON("map", "/assets/bed.json");
+        this.load.tilemapTiledJSON("map", "/assets/bed1.json");
 
         // Load player sprite
         this.load.image("player", "/assets/player.png");
 
         // Load audio indicator icon
-        this.load.image("audio", "/assets/audio-icon.png"); // Add this icon to your assets
+        this.load.image("audio", "/assets/audio-icon.png");
       }
 
       create() {
@@ -209,9 +268,20 @@ function GamePage() {
         // Set up keyboard input
         if (this.input && this.input.keyboard) {
           this.cursors = this.input.keyboard.createCursorKeys();
+          // Register E key for interaction
+          this.eKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
         } else {
           console.error("Keyboard input not available");
         }
+
+        // Create interaction text (hidden by default)
+        this.interactionText = this.add.text(
+          0, 0,
+          'Press E to interact',
+          { font: '16px Arial', color: '#ffffff', backgroundColor: '#000000', padding: { x: 5, y: 3 } }
+        );
+        this.interactionText.setOrigin(0.5);
+        this.interactionText.setVisible(false);
 
         // Set collisions
         this.layer1.setCollisionByProperty({ collides: true });
@@ -292,6 +362,31 @@ function GamePage() {
           (tileLayer1 && tileLayer1.properties && tileLayer1.properties.stage === true) ||
           (tileLayer2 && tileLayer2.properties && tileLayer2.properties.stage === true);
 
+        // Check if player is near a TV tile
+        const isTVNearby = this.checkNearbyTiles(playerTileX, playerTileY, 'tv', 2);
+        
+        // Update TV interaction state
+        if (isTVNearby && !this.nearTV) {
+          this.nearTV = true;
+          if (this.interactionText) {
+            this.interactionText.setVisible(true);
+          }
+        } else if (!isTVNearby && this.nearTV) {
+          this.nearTV = false;
+          if (this.interactionText) {
+            this.interactionText.setVisible(false);
+          }
+          // Auto-close TV popup if player walks away
+          if (showTVPopup) {
+            setShowTVPopup(false);
+          }
+        }
+        
+        // Update interaction text position if it's visible
+        if (this.nearTV && this.interactionText) {
+          this.interactionText.setPosition(this.player.x, this.player.y - 70);
+        }
+
         // Handle stage entry/exit with audio
         if (isOnStage && !this.playerOnStage) {
           console.log('Player is on stage!');
@@ -338,6 +433,22 @@ function GamePage() {
           console.log("Sending player move:", { x: this.player.x, y: this.player.y });
           sendPlayerMove({ x: this.player.x, y: this.player.y }, roomslug, username.toString());
         }
+      }
+      
+      // Helper method to check if a property exists on nearby tiles
+      checkNearbyTiles(tileX: number, tileY: number, property: string, radius: number): boolean {
+        for (let y = tileY - radius; y <= tileY + radius; y++) {
+          for (let x = tileX - radius; x <= tileX + radius; x++) {
+            const tile1 = this.map.getTileAt(x, y, false, 'Tile Layer 1');
+            const tile2 = this.map.getTileAt(x, y, false, 'Tile Layer 2');
+            
+            if ((tile1 && tile1.properties && tile1.properties[property] === true) ||
+                (tile2 && tile2.properties && tile2.properties[property] === true)) {
+              return true;
+            }
+          }
+        }
+        return false;
       }
 
       // Update the updateOtherPlayers method in SceneMain class:
@@ -481,7 +592,7 @@ function GamePage() {
         gameRef.current.destroy(true);
       }
     };
-  }, [dimensions, isConnected, roomslug, username, sendPlayerMove, sendPlayerOnStage]);
+  }, [dimensions, isConnected, roomslug, username, sendPlayerMove, sendPlayerOnStage, showTVPopup]);
 
   // Audio UI indicators - show who's currently on stage
   const renderPlayersOnStage = () => {
@@ -529,6 +640,47 @@ function GamePage() {
           sendMessage={sendMessage}
         />
       </div>
+
+      {/* TV Popup Dialog */}
+      {showTVPopup && (
+        <div 
+          className="popup absolute bg-gray-800 bg-opacity-90 border-2 border-blue-400 p-4 rounded-lg shadow-lg text-white"
+          style={{ 
+            left: `${popupPosition.x}px`, 
+            top: `${popupPosition.y}px`,
+            zIndex: 1000,
+            width: '300px',
+            transform: 'translate(-50%, -50%)'
+          }}
+        >
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-xl font-bold text-blue-300">TV Controls</h3>
+            <button 
+              onClick={() => setShowTVPopup(false)}
+              className="text-gray-300 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="mb-3">
+            <p>Welcome to the room's TV! What would you like to watch?</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded">
+              YouTube
+            </button>
+            <button className="bg-red-600 hover:bg-red-700 text-white py-2 px-3 rounded">
+              Netflix
+            </button>
+            <button className="bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded">
+              Live Stream
+            </button>
+            <button className="bg-purple-600 hover:bg-purple-700 text-white py-2 px-3 rounded">
+              Games
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Audio status indicators */}
       {renderPlayersOnStage()}

@@ -1,5 +1,7 @@
 import './App.css'
 import { useNavigate } from 'react-router-dom'
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react'
+
 
 function App() {
    const navigate = useNavigate()
@@ -11,7 +13,12 @@ function App() {
          <nav>
             <ul className="flex items-center justify-between flex-row text-white font-bold text-2xl font-['VT323']">
                <li>VOXEL</li>
-               <li><button onClick={signUp} className='text-pink-400 bg-black/80 rounded-md text-3xl w-[100px] h-[50px] hover:bg-white/80 hover:text-blue-800'>SignUp</button></li>
+                <SignedOut>
+               <SignInButton />
+               </SignedOut>
+               <SignedIn>
+               <UserButton />
+               </SignedIn>
             </ul>
          </nav>
 
