@@ -3,6 +3,7 @@ import cors from 'cors';
 import types, { Request, Response } from 'express';
 import { RtcTokenBuilder, RtcRole } from 'agora-access-token';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 
 // Load environment variables
 dotenv.config();
@@ -12,15 +13,20 @@ interface TokenQuery {
   roomName?: string;
   uid?: string;
 }
-
+const connect =async () =>{
+  await mongoose.connect("mongodb+srv://garvits093:43rDBHOUx4jmrKmU@cluster0.iokxe.mongodb.net/voxel")
+  console.log("Db connected")
+}
+connect()
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 
+const APP_ID="23828ec815ef48438b31cb5bd5c7103f"
+const APP_CERTIFICATE="6fed3f4ef07f4b2ca5c9b9bba101cba1"
 // Get Agora credentials from environment variables
-const APP_ID = process.env.AGORA_APP_ID;
-const APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
+
 
 if (!APP_ID || !APP_CERTIFICATE) {
   console.error('Missing required Agora credentials in environment variables');
@@ -59,6 +65,9 @@ app.get('/get-token', (req, res) => {
   });
 });
 
+app.post("/createroom",(req,res)=>{
+  
+})
 app.listen(PORT, () => {
   console.log(`✅ Agora token server running at http://localhost:${PORT}`);
 });
