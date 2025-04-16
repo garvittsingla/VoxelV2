@@ -74,7 +74,7 @@ function GamePage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map());
-  
+  //@ts-ignore
   const [isLeaving, setIsLeaving] = useState(false);
   const [transcriptionText, setTranscriptionText] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
