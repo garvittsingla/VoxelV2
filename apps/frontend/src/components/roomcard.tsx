@@ -1,10 +1,5 @@
 import { useState } from "react";
 
-// Import fonts (assuming you're using Google Fonts or similar)
-// You'd need to properly set these up in your Vite project
-import { Poppins } from "@fontsource/poppins"; // Adjust based on your actual font setup
-import { VT323 } from "@fontsource/vt323"; // Adjust based on your actual font setup
-
 // CSS class names for fonts
 const pop = { className: "font-poppins" };
 const poplight = { className: "font-poppins font-light" };
@@ -16,7 +11,7 @@ function Roomcard() {
 
     return (
         <div className="flex flex-row gap-2 bg-black rounded-sm p-2 w-70/100 h-full outline-1 outline-white/10 ">
-            <div className={`${className} relative w-[50%] rounded-md bg-center bg-cover flex flex-col justify-center items-center text-4xl gap-2 p-8 font-bold tracking-wider`} style={{backgroundImage: `url("/gdbgimg(1).jpg")`}}>
+            <div className={`${className} relative w-[50%] rounded-md bg-center bg-cover flex flex-col justify-center items-center text-4xl gap-2 p-8 font-bold tracking-wider`} style={{ backgroundImage: `url("/gdbgimg(1).jpg")` }}>
                 <p className="z-20">Smooth.</p>
                 <p className="z-20">Secure.</p>
                 <p className="z-20">Streamlined.</p>
@@ -33,11 +28,11 @@ function Roomcard() {
                             <label htmlFor="roomName" className={`${poplight.className} text-xl text-center align-center`}>
                                 <span className="text-4xl">🙆🏻</span> Room Name
                             </label>
-                            <input 
-                                type="text" 
-                                name="roomName" 
-                                id="roomName" 
-                                placeholder="Enter Room Name" 
+                            <input
+                                type="text"
+                                name="roomName"
+                                id="roomName"
+                                placeholder="Enter Room Name"
                                 className="pl-4 outline-2 outline-white/20 h-[40px] rounded-md"
                             />
                         </div>
@@ -45,11 +40,11 @@ function Roomcard() {
                             <label htmlFor="roomSize" className={`${poplight.className} text-xl text-center align-center`}>
                                 <span className="text-4xl">👱🏻</span> Room Size
                             </label>
-                            <input 
-                                type="text" 
-                                name="roomSize" 
-                                id="roomSize" 
-                                placeholder="Enter Room Size" 
+                            <input
+                                type="text"
+                                name="roomSize"
+                                id="roomSize"
+                                placeholder="Enter Room Size"
                                 className="pl-4 outline-2 outline-white/20 h-[40px] rounded-md"
                             />
                         </div>
@@ -68,11 +63,11 @@ function Roomcard() {
                         <label htmlFor="roomId" className={`${poplight.className} text-xl text-center align-center`}>
                             <span className="text-4xl">🔑</span> Room ID
                         </label>
-                        <input 
-                            type="text" 
-                            name="roomId" 
-                            id="roomId" 
-                            placeholder="Enter Room ID" 
+                        <input
+                            type="text"
+                            name="roomId"
+                            id="roomId"
+                            placeholder="Enter Room ID"
                             className="pl-4 outline-2 outline-white/20 h-[40px] rounded-md"
                         />
                         <button type="submit" className={`${pop.className} bg-yellow-400 h-[40px] w-90/100 hover:w-110/100 hover:bg-purple-700 transition-all duration-500 text-black flex justify-center items-center rounded-md text-xl mt-2`}>

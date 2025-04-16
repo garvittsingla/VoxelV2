@@ -38,7 +38,7 @@ function GamePage() {
 
   // Screen dimensions
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  
+
   // TV Popup state
   const [showTVPopup, setShowTVPopup] = useState(false);
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 });
@@ -70,6 +70,15 @@ function GamePage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map());
+
+  const [transcriptionText, setTranscriptionText] = useState('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  // Add a new state variable for the summary
+  const [transcriptionSummary, setTranscriptionSummary] = useState('');
+
+  // Add a new state variable for the active tab
+  const [activeTab, setActiveTab] = useState<'transcription' | 'summary'>('transcription');
 
   // Get screen size
   useEffect(() => {
@@ -142,27 +151,72 @@ function GamePage() {
   };
 
   // Handle leaving the meeting
+  // Handle leaving the meeting
+  // Handle leaving the meeting
+  // Handle leaving the meeting
   const handleLeaveMeeting = async () => {
     if (!roomslug) return;
+
+    // First, prevent immediate navigation by showing some loading indicator
+    // Add a loading state
+    const [isLeaving, setIsLeaving] = useState(false);
+
+    // At the beginning of handleLeaveMeeting:
+    setIsLeaving(true);
+
+    // If currently transcribing, wait for it to complete
+    if (isTranscribing) {
+      console.log("Waiting for transcription to complete...");
+      while (isTranscribing) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
 
     // Calculate meeting duration
     const duration = formatDuration(meetingStartTime);
 
-    // Store meeting info in localStorage
+    // Make sure we have the summary before proceeding
+    let currentSummary = transcriptionSummary;
+
+    // If there's no summary but we have transcription, try to get a summary now
+    if (!currentSummary && transcriptionText) {
+      try {
+        console.log("Generating summary before leaving...");
+        const summaryResponse = await fetch('http://localhost:5000/summarize', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ transcription: transcriptionText }),
+        });
+
+        if (summaryResponse.ok) {
+          const summaryResult = await summaryResponse.json();
+          currentSummary = summaryResult.summary;
+          console.log("Final summary generated:", currentSummary);
+        }
+      } catch (error) {
+        console.error("Error generating final summary:", error);
+      }
+    }
+
+    // Store meeting info with guaranteed latest summary
     const recentMeets = JSON.parse(localStorage.getItem('recentMeets') || '[]');
     recentMeets.unshift({
       roomName: roomslug,
       duration: duration,
       date: new Date().toISOString(),
+      summary: currentSummary || '',
+      transcription: transcriptionText || ''
     });
-    localStorage.setItem('recentMeets', JSON.stringify(recentMeets.slice(0, 10))); // Keep last 10 meetings
+    localStorage.setItem('recentMeets', JSON.stringify(recentMeets.slice(0, 10)));
 
     // Leave the Agora channel
     await agora.leaveCall();
 
-    // Navigate to dashboard
-    // window.location.href = '/dashboard';
-    navigate("/dashboard")
+    // Only navigate after everything is done
+    setIsLeaving(false);
+    navigate("/dashboard");
   };
 
   // Update other players when their positions change
@@ -179,20 +233,20 @@ function GamePage() {
       if (e.key.toLowerCase() === 'e' && sceneRef.current?.nearTV) {
         // Toggle TV popup
         setShowTVPopup(prev => !prev);
-        
+
         if (!showTVPopup && sceneRef.current?.player) {
           // Set popup position relative to player position
           const x = sceneRef.current.player.x;
           const y = sceneRef.current.player.y - 100;
-          
+
           // Convert Phaser world coordinates to screen coordinates
           const camera = sceneRef.current.cameras.main;
           const screenX = x - camera.scrollX;
           const screenY = y - camera.scrollY;
-          
-          setPopupPosition({ 
-            x: screenX + gameRef.current?.canvas.offsetLeft || 0, 
-            y: screenY + gameRef.current?.canvas.offsetTop || 0 
+
+          setPopupPosition({
+            x: screenX + gameRef.current?.canvas.offsetLeft || 0,
+            y: screenY + gameRef.current?.canvas.offsetTop || 0
           });
         }
       }
@@ -207,14 +261,14 @@ function GamePage() {
   // Close popup when clicking outside
   useEffect(() => {
     if (!showTVPopup) return;
-    
+
     const handleClickOutside = (e: MouseEvent) => {
       const popup = document.querySelector('.popup');
       if (popup && !popup.contains(e.target as Node)) {
         setShowTVPopup(false);
       }
     };
-    
+
     window.addEventListener('mousedown', handleClickOutside);
     return () => {
       window.removeEventListener('mousedown', handleClickOutside);
@@ -409,7 +463,7 @@ function GamePage() {
 
         // Check if player is near a TV tile
         const isTVNearby = this.checkNearbyTiles(playerTileX, playerTileY, 'tv', 2);
-        
+
         // Update TV interaction state
         if (isTVNearby && !this.nearTV) {
           this.nearTV = true;
@@ -426,7 +480,7 @@ function GamePage() {
             setShowTVPopup(false);
           }
         }
-        
+
         // Update interaction text position if it's visible
         if (this.nearTV && this.interactionText) {
           this.interactionText.setPosition(this.player.x, this.player.y - 70);
@@ -479,16 +533,16 @@ function GamePage() {
           sendPlayerMove({ x: this.player.x, y: this.player.y }, roomslug, username.toString());
         }
       }
-      
+
       // Helper method to check if a property exists on nearby tiles
       checkNearbyTiles(tileX: number, tileY: number, property: string, radius: number): boolean {
         for (let y = tileY - radius; y <= tileY + radius; y++) {
           for (let x = tileX - radius; x <= tileX + radius; x++) {
             const tile1 = this.map.getTileAt(x, y, false, 'Tile Layer 1');
             const tile2 = this.map.getTileAt(x, y, false, 'Tile Layer 2');
-            
+
             if ((tile1 && tile1.properties && tile1.properties[property] === true) ||
-                (tile2 && tile2.properties && tile2.properties[property] === true)) {
+              (tile2 && tile2.properties && tile2.properties[property] === true)) {
               return true;
             }
           }
@@ -726,24 +780,18 @@ function GamePage() {
         }
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         // Create audio blob from chunks
+        console.log("Creating audio blob from chunks");
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
 
-        // Create download link
-        const url = URL.createObjectURL(audioBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `stage-recording-${new Date().toISOString()}.wav`;
-        document.body.appendChild(a);
-        a.click();
+        // Instead of downloading, send to transcription service
+        setIsTranscribing(true);
+        console.log("Sending audio blob to transcription service");
+        await sendAudioForTranscription(audioBlob);
+        console.log("Transcription completed");
 
         // Clean up
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 100);
-
         // Disconnect all audio sources
         audioSourcesRef.current.forEach(source => {
           source.disconnect();
@@ -768,6 +816,98 @@ function GamePage() {
       console.error("Error starting recording:", error);
     }
   }, [isOnStage, agora.remoteUsers]);
+
+  // Function to send audio for transcription
+  const sendAudioForTranscription = async (audioBlob: Blob) => {
+    try {
+      console.log("Preparing to send audio for transcription, size:", audioBlob.size, "bytes");
+
+      // Create form data for multipart form upload
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.wav');
+
+      console.log("Sending request to transcription endpoint...");
+      // Send to transcription endpoint
+      const response = await fetch('http://localhost:5000/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+
+      console.log("Response received, status:", response.status);
+
+      if (!response.ok) {
+        // Try to get more detailed error information
+        let errorDetails = "";
+        try {
+          const errorData = await response.json();
+          errorDetails = errorData.details || errorData.error || "Unknown error";
+        } catch (e) {
+          errorDetails = "Could not parse error response";
+        }
+
+        throw new Error(`Error: ${response.status} - ${errorDetails}`);
+      }
+
+      const result = await response.json();
+      console.log("Transcription result received:", result);
+
+      // Store transcription text in state and localStorage
+      setTranscriptionText(result.text);
+      localStorage.setItem('transcription', result.text);
+
+      // Now call the summarization endpoint
+      console.log("Sending transcription for summarization...");
+      try {
+        const summaryResponse = await fetch('http://localhost:5000/summarize', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ transcription: result.text }),
+        });
+
+        if (!summaryResponse.ok) {
+          // Try to get more detailed error information
+          let errorDetails = "";
+          try {
+            const errorData = await summaryResponse.json();
+            errorDetails = errorData.details || errorData.error || "Unknown error";
+            console.error("Error getting summary:", summaryResponse.status, "-", errorDetails);
+          } catch (e) {
+            console.error("Error getting summary:", summaryResponse.status, "- Could not parse error response");
+          }
+
+          // Create a simple fallback summary if the API fails
+          const fallbackSummary = `Summary of the transcription:\n\n${result.text.substring(0, 200)}...`;
+          setTranscriptionSummary(fallbackSummary);
+          setActiveTab('transcription');
+          console.log("Using fallback summary due to API error");
+        } else {
+          const summaryResult = await summaryResponse.json();
+          console.log("Summary result received:", summaryResult);
+          setTranscriptionSummary(summaryResult.summary);
+          setActiveTab('transcription');
+        }
+      } catch (summaryError) {
+        console.error("Error in summarization request:", summaryError);
+        // Create a simple fallback summary if the API fails
+        const fallbackSummary = `Summary of the transcription:\n\n${result.text.substring(0, 200)}...`;
+        setTranscriptionSummary(fallbackSummary);
+        setActiveTab('transcription');
+        console.log("Using fallback summary due to network error");
+      }
+
+      console.log("Transcription completed successfully");
+      setIsTranscribing(false);
+
+      return result;
+    } catch (error) {
+      console.error("Error transcribing audio:", error);
+      setIsTranscribing(false);
+      // Show error to user
+      setTranscriptionText("Error transcribing audio. Please try again.");
+    }
+  };
 
   // Function to stop recording
   const stopRecording = useCallback(() => {
@@ -842,10 +982,10 @@ function GamePage() {
 
       {/* TV Popup Dialog */}
       {showTVPopup && (
-        <div 
+        <div
           className="popup absolute bg-gray-800 bg-opacity-90 border-2 border-blue-400 p-4 rounded-lg shadow-lg text-white"
-          style={{ 
-            left: `${popupPosition.x}px`, 
+          style={{
+            left: `${popupPosition.x}px`,
             top: `${popupPosition.y}px`,
             zIndex: 1000,
             width: '300px',
@@ -854,7 +994,7 @@ function GamePage() {
         >
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-xl font-bold text-blue-300">TV Controls</h3>
-            <button 
+            <button
               onClick={() => setShowTVPopup(false)}
               className="text-gray-300 hover:text-white"
             >
@@ -906,6 +1046,7 @@ function GamePage() {
             onClick={isRecording ? stopRecording : startRecording}
             className={`p-3 rounded-full ${isRecording ? 'bg-red-600' : 'bg-blue-500'} text-white shadow-lg hover:opacity-90 transition-opacity flex items-center gap-2`}
             title={isRecording ? "Stop Recording" : "Start Recording"}
+            disabled={isTranscribing}
           >
             {isRecording ? (
               <>
@@ -914,6 +1055,14 @@ function GamePage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
                 </svg>
                 <span>Stop Recording</span>
+              </>
+            ) : isTranscribing ? (
+              <>
+                <svg className="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Transcribing...</span>
               </>
             ) : (
               <>
@@ -927,12 +1076,66 @@ function GamePage() {
         </div>
       )}
 
+      {/* Transcription display */}
+      {transcriptionText && (
+        <div className="absolute top-16 right-4 bg-gray-800 bg-opacity-90 text-white p-3 rounded-lg shadow-lg max-w-md">
+          <div className="flex justify-between items-center mb-2">
+            <h4 className="text-lg font-bold text-blue-300">Audio Transcribed!</h4>
+            <button
+              onClick={() => {
+                setTranscriptionText('');
+                setTranscriptionSummary('');
+                setActiveTab('transcription');
+              }}
+              className="text-gray-300 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Tabs for Transcription and Summary */}
+          <div className="mb-3 border-b border-gray-600">
+            <div className="flex">
+              <button
+                className={`py-2 px-4 ${activeTab === 'transcription' ? 'border-b-2 border-blue-400 text-blue-300' : 'text-gray-400'}`}
+                onClick={() => setActiveTab('transcription')}
+              >
+                Transcription
+              </button>
+              {transcriptionSummary && (
+                <button
+                  className={`py-2 px-4 ${activeTab === 'summary' ? 'border-b-2 border-blue-400 text-blue-300' : 'text-gray-400'}`}
+                  onClick={() => setActiveTab('summary')}
+                >
+                  Summary
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Content area */}
+          <div className="max-h-60 overflow-y-auto">
+            {activeTab === 'transcription' && (
+              <div className="text-sm">
+                <p className="whitespace-pre-wrap">{transcriptionText}</p>
+              </div>
+            )}
+
+            {activeTab === 'summary' && transcriptionSummary && (
+              <div className="text-sm">
+                <p className="whitespace-pre-wrap">{transcriptionSummary}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Mic control overlay buttons */}
       <div className="absolute bottom-4 right-4 flex space-x-2">
         <button
           disabled={!isOnStage}
           onClick={handleMicToggle}
-          className={`p-3 rounded-full ${isOnStage ? (agora.isMicMuted ? 'bg-gray-500' : 'bg-green-500') : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity flex items-center gap-2 ${!isOnStage ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`p-3 rounded-full ${isOnStage ? (agora.isMicMuted ? 'bg-gray-500' : 'bg-green-500') : 'bg-gray-500'} text-white shadow-lg hover:opacity-90 transition-opacity flex items-center gap-2`}
           title={agora.isMicMuted ? "Unmute microphone" : "Mute microphone"}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
