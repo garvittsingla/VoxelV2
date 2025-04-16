@@ -24,7 +24,7 @@ const connect = async () => {
 connect()
 const app = express();
 const PORT = process.env.PORT || 5000;
-const ASSEMBLY_AI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
+const ASSEMBLY_AI_API_KEY = "e6fd62a9ba6047f8b8de752b6754a502";
 
 // Log API key status (without exposing the actual key)
 console.log(`AssemblyAI API Key ${ASSEMBLY_AI_API_KEY ? 'is configured' : 'is missing'}`);
@@ -60,7 +60,7 @@ const assemblyAI = axios.create({
 const APP_ID = "23828ec815ef48438b31cb5bd5c7103f"
 const APP_CERTIFICATE = "6fed3f4ef07f4b2ca5c9b9bba101cba1"
 // Get Agora credentials from environment variables
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = "AIzaSyAXFmZLcq3XW-PyqQHrn3KJS6Zm2d3JHUo";
 if (!GEMINI_API_KEY) {
   console.error('Missing GEMINI_API_KEY environment variable');
   process.exit(1);
