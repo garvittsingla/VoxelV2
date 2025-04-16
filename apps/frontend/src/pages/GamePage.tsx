@@ -74,7 +74,8 @@ function GamePage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map());
-
+  
+  const [isLeaving, setIsLeaving] = useState(false);
   const [transcriptionText, setTranscriptionText] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
 
@@ -164,12 +165,10 @@ function GamePage() {
   // Handle leaving the meeting
   const handleLeaveMeeting = async () => {
     if (!roomslug) return;
-
     // First, prevent immediate navigation by showing some loading indicator
     // Add a loading state
             //@ts-ignore
 
-    const [isLeaving, setIsLeaving] = useState(false);
 
     // At the beginning of handleLeaveMeeting:
     setIsLeaving(true);

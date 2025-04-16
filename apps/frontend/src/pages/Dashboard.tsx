@@ -86,7 +86,7 @@ const Dashboard = () => {
             {/* Top Navigation Bar */}
             <div className="bg-[#202225] h-14 flex items-center justify-between px-4 shadow-lg">
                 <div className="flex items-center space-x-4">
-                    <img src="/logo.png" alt="VOXEL Logo" className="h-8 w-8" />
+                    {/* <img src="/logo.png" alt="VOXEL Logo" className="h-8 w-8" /> */}
                     <span className="text-xl font-bold text-white">VOXEL</span>
                 </div>
                 <div className="flex items-center space-x-4">
@@ -209,12 +209,12 @@ const Dashboard = () => {
                                 >
                                     Cancel
                                 </button>
-                                <button
+                                {/* <button
                                     type="submit"
                                     className="px-4 py-2 text-sm font-medium text-white bg-[#5865f2] hover:bg-[#4752c4] rounded-md transition-colors duration-150"
                                 >
                                     Join Room
-                                </button>
+                                </button> */}
                             </div>
                         </form>
                     </div>
