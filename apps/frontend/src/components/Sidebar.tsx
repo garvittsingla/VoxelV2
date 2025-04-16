@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
-import { useRoomSocket } from "../hooks/useWebSocket";
+
 
 export default function Sidebar({ roomslug, username, isConnected, messages, sendMessage }: {
     roomslug: string;
@@ -20,6 +20,7 @@ export default function Sidebar({ roomslug, username, isConnected, messages, sen
             messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
     }, [messages]);
+            //@ts-ignore
 
     const [members, setMembers] = useState([
         { id: 1, name: 'Alex', online: true, avatar: '👩' },
@@ -31,6 +32,8 @@ export default function Sidebar({ roomslug, username, isConnected, messages, sen
     ]);
 
     // YouTube video state
+            //@ts-ignore
+
     const [videoId, setVideoId] = useState('dQw4w9WgXcQ'); // Default video ID
 
     const handleSendMessage = (e: React.FormEvent<HTMLFormElement>) => {

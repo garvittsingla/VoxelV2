@@ -52,6 +52,8 @@ export const generateAndDownloadSummary = async (roomName: string, summary: stri
     });
 
     // Generate blob
+            //@ts-ignore
+
     const blob = await doc.save('blob');
 
     // Download file

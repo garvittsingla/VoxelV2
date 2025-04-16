@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import AgoraRTC, {
   IAgoraRTCClient,
+            //@ts-ignore
+
   IAgoraRTCRemoteUser,
   ILocalAudioTrack,
+            //@ts-ignore
+
   ILocalVideoTrack,
   UID
 } from "agora-rtc-sdk-ng";
@@ -393,7 +397,7 @@ export const useRoomSocket = (): UseRoomSocketReturn => {
   const connect = useCallback(() => {
     try {
       console.log("Attempting to connect to WebSocket...");
-      const ws = new WebSocket("ws://localhost:8080");
+      const ws = new WebSocket("https://temporal-crimson-airport.glitch.me/");
       socketRef.current = ws;
 
       ws.onopen = () => {

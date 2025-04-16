@@ -1,13 +1,11 @@
 import './App.css'
-import { useNavigate } from 'react-router-dom'
+
 import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react'
 
 
 function App() {
-   const navigate = useNavigate()
-   function signUp() {
-      navigate("/game/meet")
-   }
+
+   
    return (
       <div className="h-screen w-full antialiased p-8 flex flex-col bg-center" style={{ backgroundImage: `url("/pxeljungle.gif")`, backgroundSize: 'cover', backgroundRepeat: 'no-repeat', backgroundColor: '#000' }}>
          <nav>

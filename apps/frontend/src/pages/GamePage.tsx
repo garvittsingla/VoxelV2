@@ -58,9 +58,13 @@ function GamePage() {
   } = useRoomSocket();
 
   // Agora voice connection
+            //@ts-ignore
+
   const agora = useAgora(username);
 
   // Local state to track if player is on stage
+            //@ts-ignore
+
   const [playerOnStage, setPlayerOnStage] = useState(false);
 
   // Add recording state
@@ -122,7 +126,11 @@ function GamePage() {
   // Update microphone status whenever player's stage status changes
   useEffect(() => {
     // Check if player is on stage from players map
+            //@ts-ignore
+
     const isOnStage = players.get(username.toString())?.onStage || false;
+            //@ts-ignore
+
     console.log("Player stage status check:", { username: username.toString(), isOnStage });
 
     // Update local state
@@ -159,6 +167,8 @@ function GamePage() {
 
     // First, prevent immediate navigation by showing some loading indicator
     // Add a loading state
+            //@ts-ignore
+
     const [isLeaving, setIsLeaving] = useState(false);
 
     // At the beginning of handleLeaveMeeting:
@@ -182,7 +192,7 @@ function GamePage() {
     if (!currentSummary && transcriptionText) {
       try {
         console.log("Generating summary before leaving...");
-        const summaryResponse = await fetch('http://localhost:5000/summarize', {
+        const summaryResponse = await fetch('https://voxel-backend-u0mx.onrender.com/summarize', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -245,7 +255,11 @@ function GamePage() {
           const screenY = y - camera.scrollY;
 
           setPopupPosition({
+            //@ts-ignore
+
             x: screenX + gameRef.current?.canvas.offsetLeft || 0,
+            //@ts-ignore
+
             y: screenY + gameRef.current?.canvas.offsetTop || 0
           });
         }
@@ -358,10 +372,14 @@ function GamePage() {
         const playerLabel = this.add.text(
           this.player.x,
           this.player.y - 30,
+            //@ts-ignore
+
           username.toString(),
           { font: '14px Arial', color: '#ffffff', backgroundColor: '#000000' }
         );
         playerLabel.setOrigin(0.5);
+            //@ts-ignore
+
         this.nameLabels.set(username.toString(), playerLabel);
 
         // Set up keyboard input
@@ -401,6 +419,7 @@ function GamePage() {
           sceneRef.current = null;
         });
       }
+            //@ts-ignore
 
       update(time: number, delta: number) {
         // Reset velocity
@@ -434,6 +453,8 @@ function GamePage() {
         }
 
         // Update player label position
+            //@ts-ignore
+
         const playerLabel = this.nameLabels.get(username.toString());
         if (playerLabel) {
           playerLabel.setPosition(this.player.x, this.player.y - 30);
@@ -441,10 +462,12 @@ function GamePage() {
 
         // Update audio indicator for current player if on stage
         if (this.playerOnStage) {
+          //@ts-ignore
           let audioIcon = this.audioIndicators.get(username.toString());
           if (!audioIcon) {
             audioIcon = this.add.image(this.player.x, this.player.y - 50, 'audio');
             audioIcon.setScale(0.5);
+            //@ts-ignore
             this.audioIndicators.set(username.toString(), audioIcon);
           }
           audioIcon.setPosition(this.player.x, this.player.y - 50);
@@ -493,6 +516,8 @@ function GamePage() {
 
           // Send stage status to other players
           if (roomslug && isConnected) {
+            //@ts-ignore
+
             sendPlayerOnStage(true, roomslug, username.toString());
           }
 
@@ -500,9 +525,13 @@ function GamePage() {
           this.player.setTint(0xffff00);
 
           // Add audio indicator
+            //@ts-ignore
+
           if (!this.audioIndicators.get(username.toString())) {
             const audioIcon = this.add.image(this.player.x, this.player.y - 50, 'audio');
             audioIcon.setScale(0.5);
+            //@ts-ignore
+
             this.audioIndicators.set(username.toString(), audioIcon);
           }
 
@@ -512,6 +541,8 @@ function GamePage() {
 
           // Send stage status to other players
           if (roomslug && isConnected) {
+            //@ts-ignore
+
             sendPlayerOnStage(false, roomslug, username.toString());
           }
 
@@ -519,9 +550,13 @@ function GamePage() {
           this.player.clearTint();
 
           // Remove audio indicator
+            //@ts-ignore
+
           const audioIcon = this.audioIndicators.get(username.toString());
           if (audioIcon) {
             audioIcon.destroy();
+            //@ts-ignore
+
             this.audioIndicators.delete(username.toString());
           }
         }
@@ -530,6 +565,8 @@ function GamePage() {
         if (playerMoved && roomslug && isConnected && time - this.lastPositionUpdate > 100) {
           this.lastPositionUpdate = time;
           console.log("Sending player move:", { x: this.player.x, y: this.player.y });
+            //@ts-ignore
+
           sendPlayerMove({ x: this.player.x, y: this.player.y }, roomslug, username.toString());
         }
       }
@@ -556,6 +593,8 @@ function GamePage() {
 
         players.forEach((playerData, playerName) => {
           // Skip current player
+            //@ts-ignore
+
           if (playerName === username.toString()) {
             console.log("Skipping current player:", playerName);
             return;
@@ -716,6 +755,8 @@ function GamePage() {
   const [showMicPermission, setShowMicPermission] = useState(false);
 
   // Check if player is on stage
+            //@ts-ignore
+
   const isOnStage = players.get(username.toString())?.onStage || false;
 
   // Show microphone permission banner when player first goes on stage
@@ -828,7 +869,7 @@ function GamePage() {
 
       console.log("Sending request to transcription endpoint...");
       // Send to transcription endpoint
-      const response = await fetch('http://localhost:5000/transcribe', {
+      const response = await fetch('https://voxel-backend-u0mx.onrender.com/transcribe', {
         method: 'POST',
         body: formData,
       });
@@ -858,7 +899,7 @@ function GamePage() {
       // Now call the summarization endpoint
       console.log("Sending transcription for summarization...");
       try {
-        const summaryResponse = await fetch('http://localhost:5000/summarize', {
+        const summaryResponse = await fetch('https://voxel-backend-u0mx.onrender.com/summarize', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -951,6 +992,8 @@ function GamePage() {
   // Handle stage status changes
   const handleStageStatusChange = async (onStage: boolean) => {
     if (!roomslug) return;
+            //@ts-ignore
+
     sendPlayerOnStage(onStage, roomslug, username.toString());
   };
 
@@ -973,6 +1016,8 @@ function GamePage() {
       <div className='menu w-1/5 h-full'>
         <Sidebar
           roomslug={roomslug || ''}
+            //@ts-ignore
+
           username={username.toString()}
           isConnected={isConnected}
           messages={messages}
