@@ -12,7 +12,7 @@ function App() {
             <ul className="flex items-center justify-between flex-row text-white font-bold text-2xl font-['VT323']">
                <li>VOXEL</li>
                 <SignedOut>
-               <SignInButton />
+               <SignInButton forceRedirectUrl="/dashboard"/>
                </SignedOut>
                <SignedIn>
                <UserButton />
